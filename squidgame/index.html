@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cobweb Printer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto&display=swap');
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Roboto', sans-serif;
+            background: #111;
+            color: #ddd;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+        }
+
+        h1 {
+            font-size: 1.2rem;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin: 0;
+            opacity: 0.7;
+        }
+
+        canvas {
+            display: block;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        #controls {
+            display: flex;
+            gap: 8px;
+            width: 700px;
+        }
+
+        #phrase {
+            flex: 1;
+            padding: 8px 12px;
+            font-size: 1rem;
+            font-family: monospace;
+            background: #1e1e1e;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+            color: #eee;
+            outline: none;
+        }
+
+        #phrase:focus {
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        #renderBtn {
+            padding: 8px 20px;
+            font-size: 1rem;
+            background: #2a2a2a;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            color: #eee;
+            cursor: pointer;
+            letter-spacing: 0.05em;
+        }
+
+        #renderBtn:hover {
+            background: #383838;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Cobweb Printer</h1>
+    <canvas id="c" width="700" height="500"></canvas>
+    <div id="controls">
+        <input id="phrase" type="text" placeholder="Enter a phrase and press Render…" />
+        <button id="renderBtn">Render</button>
+    </div>
+
+    <script type="module">
+        import { compileStreaming } from "./main.mjs";
+        const app = await compileStreaming(fetch("main.wasm"));
+        const instance = await app.instantiate({});
+        instance.invokeMain();
+    </script>
+</body>
+
+</html>
