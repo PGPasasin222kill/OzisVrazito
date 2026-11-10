@@ -94,13 +94,13 @@ class OverlayService: Service() {
         fun bubble(symbol:String, label:String, action:()->Unit):TextView =
             TextView(this).apply {
                 text=symbol
-                textSize=19f
+                textSize=(size*.46f).coerceIn(11f,22f)
                 gravity=Gravity.CENTER
                 contentDescription=label
                 setTextColor(Color.WHITE)
                 background=android.graphics.drawable.GradientDrawable().apply {
                     setColor(Color.argb(224,40,39,46))
-                    cornerRadius=dp(15).toFloat()
+                    shape=android.graphics.drawable.GradientDrawable.OVAL
                 }
                 layoutParams=LinearLayout.LayoutParams(dp(size),dp(size)).apply {
                     marginEnd=dp(4)
@@ -176,12 +176,13 @@ class OverlayService: Service() {
         menu.addView(messageButton)
         val sizeLabel=menuButton("Mărime: ${UserPrefs.sizeDp(this)} dp") {}
         fun updateSize(change:Int) {
-            val newSize=(UserPrefs.sizeDp(this)+change).coerceIn(36,64)
+            val newSize=(UserPrefs.sizeDp(this)+change).coerceIn(24,64)
             UserPrefs.setSizeDp(this,newSize)
             for (button in listOf(scanButton,gearButton)) {
                 button.layoutParams=LinearLayout.LayoutParams(dp(newSize),dp(newSize)).apply {
                     marginEnd=dp(4)
                 }
+                button.textSize=(newSize*.46f).coerceIn(11f,22f)
             }
             sizeLabel.text="Mărime: $newSize dp"
         }
@@ -207,11 +208,59 @@ class OverlayService: Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity=Gravity.TOP or Gravity.END
-            y=dp(35)
+            gravity=Gravity.TOP or Gravity.START
+            x=UserPrefs.overlayX(this@OverlayService).let {
+                if(it>=0) it else (width-dp(230)).coerceAtLeast(0)
+            }
+            y=UserPrefs.overlayY(this@OverlayService).let {
+                if(it>=0) it else dp(90)
+            }
+            x=x.coerceIn(0,(width-dp(100)).coerceAtLeast(0))
+            y=y.coerceIn(0,(height-dp(100)).coerceAtLeast(0))
         }
         controls=root
         wm.addView(root,params)
+        // Drag either circular button to move the complete overlay.
+        fun allowDragging(button:View) {
+            button.setOnTouchListener(object:View.OnTouchListener {
+                var startX=0f
+                var startY=0f
+                var originalX=0
+                var originalY=0
+                var dragged=false
+                override fun onTouch(view:View?,event:MotionEvent):Boolean {
+                    when(event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            startX=event.rawX; startY=event.rawY
+                            originalX=params.x; originalY=params.y
+                            dragged=false
+                            return true
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val dx=event.rawX-startX
+                            val dy=event.rawY-startY
+                            if(!dragged && (kotlin.math.abs(dx)>dp(6) || kotlin.math.abs(dy)>dp(6)))
+                                dragged=true
+                            if(dragged) {
+                                params.x=(originalX+dx.toInt()).coerceIn(0,(width-root.width).coerceAtLeast(0))
+                                params.y=(originalY+dy.toInt()).coerceIn(0,(height-root.height).coerceAtLeast(0))
+                                try { wm.updateViewLayout(root,params) } catch(_:Exception) {}
+                            }
+                            return true
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            if(dragged) UserPrefs.saveOverlayPosition(this@OverlayService,params.x,params.y)
+                            else view?.performClick()
+                            return true
+                        }
+                        MotionEvent.ACTION_CANCEL -> return true
+                    }
+                    return false
+                }
+            })
+        }
+        allowDragging(scanButton)
+        allowDragging(gearButton)
     }
     private fun clearMarks() {
         clearJob?.let { handler.removeCallbacks(it) }
@@ -227,6 +276,8 @@ class OverlayService: Service() {
         val id=++scanGeneration
         clearMarks()
         setStatus("Scanez...")
+        // Hide our own buttons while reading colors, including after dragging over the grid.
+        controls?.visibility=View.INVISIBLE
         // Allow time for WindowManager to remove the previous image from the captured screen.
         handler.postDelayed({ if (!stopped && id==scanGeneration) capture(0,id) },650)
     }
@@ -238,6 +289,7 @@ class OverlayService: Service() {
                 handler.postDelayed({ capture(attempt+1,id) },180)
             } else {
                 scanBusy=false
+                controls?.visibility=View.VISIBLE
                 setStatus("Nu am primit captura. Încearcă din nou.")
             }
             return
@@ -252,6 +304,7 @@ class OverlayService: Service() {
             padded.recycle()
             cropped
         } catch(e:Exception) { null } finally { img.close() }
+        controls?.visibility=View.VISIBLE
         if(bitmap==null) {
             scanBusy=false
             setStatus("Nu pot citi captura ecranului.")
@@ -259,7 +312,7 @@ class OverlayService: Service() {
         }
         setStatus("Scanez tabla...")
         Thread {
-            val scan=try { Puzzle.detect(bitmap) }
+            val scan=try { Puzzle.detect(bitmap,UserPrefs.verifyResult(this)) }
                 catch(e:Exception) { Puzzle.Scan(null,"Eroare la scanare: "+e.javaClass.simpleName) }
             bitmap.recycle()
             handler.post {
@@ -273,7 +326,7 @@ class OverlayService: Service() {
                 }
                 // Never stack windows: one puzzle => exactly N stars.
                 clearMarks()
-                val marks=MarksView(this,result.columns,result.board)
+                val marks=MarksView(this,result.columns,result.board,UserPrefs.starOpacity(this))
                 val params=WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -285,19 +338,25 @@ class OverlayService: Service() {
                     // Android 12+ blocks touch pass-through from untrusted
                     // overlays if window opacity exceeds 0.8. 0.65 keeps
                     // stars visible while allowing taps on the game below.
-                    alpha=0.65f
+                    alpha=0.79f
                 }
                 overlay=marks
                 wm.addView(marks,params)
                 setStatus(scan.message+" — "+result.size+" steluțe")
                 // Marks disappear automatically, even if user forgets to press Hide.
-                val expiration=Runnable {
-                    clearMarks()
-                    setStatus("Steluțele au dispărut. Apasă MEOW pentru alt nivel.")
+                val duration=UserPrefs.duration(this)
+                if(duration>0) {
+                    val expiration=Runnable {
+                        if(!stopped && id==scanGeneration) {
+                            clearMarks()
+                            setStatus("Marcajele au dispărut. Apasă MEOW pentru alt nivel.")
+                        }
+                    }
+                    clearJob=expiration
+                    handler.postDelayed(expiration,duration*1000L)
                 }
-                clearJob=expiration
-                handler.postDelayed(expiration,20000L)
-                appToast("Gata: "+result.size+"×"+result.size+" — marcajele dispar în 20 sec.")
+                appToast(if(duration>0) "Gata: "+result.size+"×"+result.size+" — "+duration+" secunde"
+                    else "Gata: "+result.size+"×"+result.size+" — ascunde manual din ⚙")
             }
         }.start()
     }
@@ -314,12 +373,17 @@ class OverlayService: Service() {
         projection?.stop()
         super.onDestroy()
     }
-    private class MarksView(ctx:Context,val columns:IntArray,val board:Puzzle.Board):View(ctx) {
+    private class MarksView(ctx:Context,val columns:IntArray,val board:Puzzle.Board,opacity:Int):View(ctx) {
         private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color=Color.YELLOW
             style=Paint.Style.FILL
             textAlign=Paint.Align.CENTER
             setShadowLayer(4f,1f,2f,Color.BLACK)
+        }
+        init { setOpacity(opacity) }
+        fun setOpacity(value:Int) {
+            paint.alpha=value.coerceIn(20,100)*255/100
+            invalidate()
         }
         override fun onDraw(canvas:Canvas) {
             super.onDraw(canvas)
