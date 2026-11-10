@@ -46,7 +46,7 @@ class OverlayService: Service() {
         else @Suppress("DEPRECATION") (intent?.getParcelableExtra("resultData") as? Intent)
         if(token==null) { stopSelf(); return START_NOT_STICKY }
         val m=getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projection=m.getMediaProjection(intent.getIntExtra("resultCode",Activity.RESULT_CANCELED),token)
+        projection=m.getMediaProjection(intent?.getIntExtra("resultCode",Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED,token)
         projection?.registerCallback(object:MediaProjection.Callback() {
             override fun onStop() { handler.post { stopSelf() } }
         },handler)
