@@ -68,50 +68,150 @@ class OverlayService: Service() {
         showControls()
         return START_NOT_STICKY
     }
+    private fun dp(value:Int):Int =
+        (value * resources.displayMetrics.density).toInt()
+
+    private fun setStatus(message:String) {
+        if (UserPrefs.showMessages(this)) statusText?.text=message
+    }
+
+    private fun appToast(message:String, long:Boolean=false) {
+        if (UserPrefs.showMessages(this)) Toast.makeText(
+            this,message,if(long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
+        ).show()
+    }
+
     private fun showControls() {
-        val container=LinearLayout(this).apply {
+        // Default: two small floating buttons. More actions are in the gear menu.
+        val root=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
-            setBackgroundColor(Color.argb(210,35,33,44))
-            setPadding(8,8,8,8)
         }
-        val button=Button(this).apply {
-            text="🐱 MEOW"
-            setOnClickListener { scan() }
+        val top=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            gravity=Gravity.END
         }
+        val size=UserPrefs.sizeDp(this)
+        fun bubble(symbol:String, label:String, action:()->Unit):TextView =
+            TextView(this).apply {
+                text=symbol
+                textSize=19f
+                gravity=Gravity.CENTER
+                contentDescription=label
+                setTextColor(Color.WHITE)
+                background=android.graphics.drawable.GradientDrawable().apply {
+                    setColor(Color.argb(224,40,39,46))
+                    cornerRadius=dp(15).toFloat()
+                }
+                layoutParams=LinearLayout.LayoutParams(dp(size),dp(size)).apply {
+                    marginEnd=dp(4)
+                }
+                setOnClickListener { action() }
+            }
+        val menu=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            visibility=View.GONE
+            setPadding(dp(8),dp(6),dp(8),dp(8))
+            background=android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.argb(231,42,41,47))
+                cornerRadius=dp(10).toFloat()
+            }
+        }
+        val scanButton=bubble("🐱","Scanează tabla") {
+            menu.visibility=View.GONE
+            scan()
+        }
+        val gearButton=bubble("⚙","Setări rapide") {
+            menu.visibility=if(menu.visibility==View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        top.addView(scanButton)
+        top.addView(gearButton)
+        root.addView(top)
+
         val info=TextView(this).apply {
-            text="Apasă pentru scanare automată"
-            setTextColor(Color.WHITE)
+            text="Apasă 🐱 pentru scanare"
             textSize=11f
+            setTextColor(Color.WHITE)
+            setPadding(dp(5),dp(3),dp(5),dp(3))
+            maxWidth=dp(160)
+            visibility=if(UserPrefs.showMessages(this@OverlayService)) View.VISIBLE else View.GONE
+            background=android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.argb(205,42,41,47))
+                cornerRadius=dp(6).toFloat()
+            }
         }
-        container.addView(button)
-        container.addView(info)
+        root.addView(info)
         statusText=info
-        container.addView(Button(this).apply {
-            text="ASCUNDE ★"
-            setOnClickListener {
-                // Invalidate any in-flight scan so it cannot redisplay old stars.
-                scanGeneration++
-                scanBusy=false
-                clearMarks()
-                statusText?.text="Steluțele au fost ascunse."
+
+        fun menuButton(title:String, onClick:()->Unit):TextView =
+            TextView(this).apply {
+                text=title
+                textSize=14f
+                setTextColor(Color.WHITE)
+                gravity=Gravity.CENTER
+                setPadding(dp(8),dp(11),dp(8),dp(11))
+                setOnClickListener { onClick() }
             }
+        menu.addView(menuButton("ASCUNDE ★") {
+            scanGeneration++
+            scanBusy=false
+            clearMarks()
+            setStatus("Marcajele au fost ascunse")
+            menu.visibility=View.GONE
         })
-        container.addView(Button(this).apply {
-            text="STOP"
-            setOnClickListener {
-                scanGeneration++
-                scanBusy=false
-                clearMarks()
-                stopSelf()
+        val messageButton=menuButton(
+            if (UserPrefs.showMessages(this)) "Mesaje: ON" else "Mesaje: OFF"
+        ) {
+            val enabled=!UserPrefs.showMessages(this)
+            UserPrefs.setShowMessages(this,enabled)
+            info.visibility=if(enabled) View.VISIBLE else View.GONE
+            if(enabled) info.text="Mesajele sunt pornite"
+        }
+        messageButton.setOnClickListener {
+            val enabled=!UserPrefs.showMessages(this)
+            UserPrefs.setShowMessages(this,enabled)
+            info.visibility=if(enabled) View.VISIBLE else View.GONE
+            messageButton.text=if(enabled) "Mesaje: ON" else "Mesaje: OFF"
+            if(enabled) info.text="Mesajele sunt pornite"
+        }
+        menu.addView(messageButton)
+        val sizeLabel=menuButton("Mărime: ${UserPrefs.sizeDp(this)} dp") {}
+        fun updateSize(change:Int) {
+            val newSize=(UserPrefs.sizeDp(this)+change).coerceIn(36,64)
+            UserPrefs.setSizeDp(this,newSize)
+            for (button in listOf(scanButton,gearButton)) {
+                button.layoutParams=LinearLayout.LayoutParams(dp(newSize),dp(newSize)).apply {
+                    marginEnd=dp(4)
+                }
             }
+            sizeLabel.text="Mărime: $newSize dp"
+        }
+        val sizeRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        sizeRow.addView(menuButton("−") { updateSize(-4) },
+            LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f))
+        sizeRow.addView(sizeLabel,
+            LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,2f))
+        sizeRow.addView(menuButton("+") { updateSize(4) },
+            LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f))
+        menu.addView(sizeRow)
+        menu.addView(menuButton("STOP") {
+            scanGeneration++
+            scanBusy=false
+            clearMarks()
+            stopSelf()
         })
+        root.addView(menu)
         val params=WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,PixelFormat.TRANSLUCENT
-        ).apply { gravity=Gravity.TOP or Gravity.END; y=100 }
-        controls=container
-        wm.addView(container,params)
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity=Gravity.TOP or Gravity.END
+            y=dp(35)
+        }
+        controls=root
+        wm.addView(root,params)
     }
     private fun clearMarks() {
         clearJob?.let { handler.removeCallbacks(it) }
@@ -126,7 +226,7 @@ class OverlayService: Service() {
         scanBusy=true
         val id=++scanGeneration
         clearMarks()
-        statusText?.text="Scanez..."
+        setStatus("Scanez...")
         // Allow time for WindowManager to remove the previous image from the captured screen.
         handler.postDelayed({ if (!stopped && id==scanGeneration) capture(0,id) },650)
     }
@@ -138,7 +238,7 @@ class OverlayService: Service() {
                 handler.postDelayed({ capture(attempt+1,id) },180)
             } else {
                 scanBusy=false
-                statusText?.text="Nu am primit captura. Încearcă din nou."
+                setStatus("Nu am primit captura. Încearcă din nou.")
             }
             return
         }
@@ -154,10 +254,10 @@ class OverlayService: Service() {
         } catch(e:Exception) { null } finally { img.close() }
         if(bitmap==null) {
             scanBusy=false
-            statusText?.text="Nu pot citi captura ecranului."
+            setStatus("Nu pot citi captura ecranului.")
             return
         }
-        statusText?.text="Scanez tabla..."
+        setStatus("Scanez tabla...")
         Thread {
             val scan=try { Puzzle.detect(bitmap) }
                 catch(e:Exception) { Puzzle.Scan(null,"Eroare la scanare: "+e.javaClass.simpleName) }
@@ -167,8 +267,8 @@ class OverlayService: Service() {
                 scanBusy=false
                 val result=scan.result
                 if(result==null) {
-                    statusText?.text=scan.message
-                    Toast.makeText(this,scan.message,Toast.LENGTH_LONG).show()
+                    setStatus(scan.message)
+                    appToast(scan.message,true)
                     return@post
                 }
                 // Never stack windows: one puzzle => exactly N stars.
@@ -189,15 +289,15 @@ class OverlayService: Service() {
                 }
                 overlay=marks
                 wm.addView(marks,params)
-                statusText?.text=scan.message+" — "+result.size+" steluțe"
+                setStatus(scan.message)+" — "+result.size+" steluțe"
                 // Marks disappear automatically, even if user forgets to press Hide.
                 val expiration=Runnable {
                     clearMarks()
-                    statusText?.text="Steluțele au dispărut. Apasă MEOW pentru alt nivel."
+                    setStatus("Steluțele au dispărut. Apasă MEOW pentru alt nivel.")
                 }
                 clearJob=expiration
                 handler.postDelayed(expiration,20000L)
-                Toast.makeText(this,"Gata: "+result.size+"×"+result.size+" — marcajele dispar în 20 sec.",Toast.LENGTH_SHORT).show()
+                appToast("Gata: "+result.size+"×"+result.size+" — marcajele dispar în 20 sec.")
             }
         }.start()
     }
