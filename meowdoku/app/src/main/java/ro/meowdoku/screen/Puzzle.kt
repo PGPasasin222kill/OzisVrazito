@@ -17,7 +17,7 @@ object Puzzle {
     data class Result(val columns: IntArray, val count: Int, val board: Board) {
         val size: Int get() = columns.size
     }
-    data class Scan(val result: Result?, val message: String)
+    data class Scan(val result: Result?, val message: String, val gridSize:Int=0, val colors:Int=0)
 
     private data class Span(val start: Int, val end: Int) {
         val length get() = end - start + 1
@@ -28,7 +28,7 @@ object Puzzle {
         .16f to .50f, .84f to .50f, .50f to .16f, .50f to .84f
     )
 
-    fun detect(bitmap: Bitmap, strict: Boolean = true): Scan {
+    fun detect(bitmap: Bitmap, strict: Boolean = true, manual: Board? = null): Scan {
         val w = bitmap.width
         val h = bitmap.height
         if (w < 200 || h < 250) return Scan(null, "Captură prea mică.")
@@ -52,36 +52,49 @@ object Puzzle {
             }
             hits.toDouble() / total.coerceAtLeast(1)
         }
-        val rows = longestBand(rowActivity, 12, .32, (w * .48).toInt())
-            ?: return Scan(null, "Nu am găsit tabla colorată pe ecran.")
-        fun edgeStart(activity: DoubleArray, p: Int): Int {
-            for (i in (p - 9).coerceAtLeast(0)..(p + 10).coerceAtMost(activity.lastIndex))
-                if (activity[i] > .30) return i
-            return p
-        }
-        fun edgeEnd(activity: DoubleArray, p: Int): Int {
-            for (i in (p + 9).coerceAtMost(activity.lastIndex) downTo (p - 10).coerceAtLeast(0))
-                if (activity[i] > .30) return i
-            return p
-        }
-        val y0 = edgeStart(rowActivity, rows.start)
-        val y1 = edgeEnd(rowActivity, rows.end)
-        val colActivity = DoubleArray(w) { x ->
-            var hits = 0
-            var total = 0
-            for (y in y0..y1 step 4) {
-                if (colorful(x, y)) hits++
-                total++
+        val board = if(manual != null) {
+            val b=manual
+            if(b.left<0 || b.top<0 || b.right>=w || b.bottom>=h ||
+                b.right-b.left<100 || b.bottom-b.top<100)
+                return Scan(null,"Calibrare invalidă. Refă poziția marginilor.")
+            b
+        } else {
+            val rows = longestBand(rowActivity, 12, .32, (w * .36).toInt())
+                ?: return Scan(null, "Nu am găsit tabla colorată pe ecran.")
+            fun edgeStart(activity: DoubleArray, p: Int): Int {
+                for (i in (p - 9).coerceAtLeast(0)..(p + 10).coerceAtMost(activity.lastIndex))
+                    if (activity[i] > .30) return i
+                return p
             }
-            hits.toDouble() / total.coerceAtLeast(1)
+            fun edgeEnd(activity: DoubleArray, p: Int): Int {
+                for (i in (p + 9).coerceAtMost(activity.lastIndex) downTo (p - 10).coerceAtLeast(0))
+                    if (activity[i] > .30) return i
+                return p
+            }
+            val yStart=edgeStart(rowActivity,rows.start)
+            val yEnd=edgeEnd(rowActivity,rows.end)
+            val activity=DoubleArray(w) { x ->
+                var hits=0
+                var total=0
+                for(y in yStart..yEnd step 4) {
+                    if(colorful(x,y)) hits++
+                    total++
+                }
+                hits.toDouble()/total.coerceAtLeast(1)
+            }
+            val cols=longestBand(activity,12,.32,(w*.36).toInt())
+                ?: return Scan(null,"Nu pot localiza marginile tablei.")
+            val xStart=edgeStart(activity,cols.start)
+            val xEnd=edgeEnd(activity,cols.end)
+            if(xEnd<=xStart || yEnd<=yStart ||
+                abs((xEnd-xStart).toDouble()/(yEnd-yStart)-1.0)>.18)
+                return Scan(null,"Tabla găsită nu este pătrată.")
+            Board(xStart,yStart,xEnd,yEnd)
         }
-        val cols = longestBand(colActivity, 12, .32, (w * .4).toInt())
-            ?: return Scan(null, "Nu pot localiza marginile tablei.")
-        val x0 = edgeStart(colActivity, cols.start)
-        val x1 = edgeEnd(colActivity, cols.end)
-        if (x1 <= x0 || y1 <= y0 ||
-            abs((x1-x0).toDouble()/(y1-y0) - 1.0) > .18)
-            return Scan(null, "Tabla găsită nu este pătrată.")
+        val x0=board.left
+        val x1=board.right
+        val y0=board.top
+        val y1=board.bottom
 
         // The white gutters between adjacent cells identify the exact grid size.
         val colGutterActivity = DoubleArray(w) { x ->
@@ -107,9 +120,8 @@ object Puzzle {
         val n = xGaps.size + 1
         if (n < 3 || n > 24 || yGaps.size + 1 != n ||
             !regular(xGaps) || !regular(yGaps))
-            return Scan(null, "Nu am identificat corect numărul rândurilor și coloanelor.")
+            return Scan(null, "Nu am identificat corect numărul rândurilor și coloanelor.", n)
 
-        val board = Board(x0, y0, x1, y1)
         val raw = arrayOfNulls<Int>(n*n)
         val bw = (x1-x0+1).toFloat()
         val bh = (y1-y0+1).toFloat()
@@ -162,7 +174,7 @@ object Puzzle {
             }
         }
         if (palette.size < n)
-            return Scan(null, "Am detectat "+palette.size+" culori pentru o tablă "+n+"×"+n+".")
+            return Scan(null, "Am detectat "+palette.size+" culori pentru o tablă "+n+"×"+n+".",n,palette.size)
 
         // Discard isolated abnormal colors caused by an overlapping window.
         val chosen = palette.indices.sortedWith(
@@ -183,7 +195,7 @@ object Puzzle {
         // Optional confidence gate: reject screenshots with too many uncertain cells.
         val unknownBeforeFill=regions.count { it<0 }
         if(strict && unknownBeforeFill>maxOf(2,n*n/15))
-            return Scan(null,"Prea multe căsuțe sunt acoperite. Mută butonul MEOW și încearcă din nou.")
+            return Scan(null,"Prea multe căsuțe sunt acoperite. Mută butonul MEOW și încearcă din nou.",n,palette.size)
         // If a portion of a colored cell was covered, infer from its neighbors.
         repeat(n) {
             for (i in regions.indices) {
@@ -200,9 +212,9 @@ object Puzzle {
             }
         }
         if (regions.any { it<0 } || regions.toSet().size != n)
-            return Scan(null, "Unele regiuni sunt acoperite sau culorile nu sunt clare.")
+            return Scan(null, "Unele regiuni sunt acoperite sau culorile nu sunt clare.",n,palette.size)
         if(strict && !regionsConnected(regions,n))
-            return Scan(null, "Verificarea a găsit regiuni neclare. Reîncearcă pe tabla complet vizibilă.")
+            return Scan(null, "Verificarea a găsit regiuni neclare. Reîncearcă pe tabla complet vizibilă.",n,palette.size)
 
         val sol = IntArray(n) { -1 }
         var found=0
@@ -232,10 +244,10 @@ object Puzzle {
             }
         }
         search(0,0L,0L)
-        if (timedOut) return Scan(null, "Nivelul este prea complex pentru scanarea rapidă.")
-        val solution=first ?: return Scan(null,"Nu găsesc o soluție: verifică dacă tabla e complet vizibilă.")
-        if (found!=1) return Scan(null,"Am găsit mai multe soluții: o regiune poate fi citită greșit.")
-        return Scan(Result(solution,found,board),"Soluție "+n+"×"+n)
+        if (timedOut) return Scan(null, "Nivelul este prea complex pentru scanarea rapidă.",n,palette.size)
+        val solution=first ?: return Scan(null,"Nu găsesc o soluție: verifică dacă tabla e complet vizibilă.",n,palette.size)
+        if (found!=1) return Scan(null,"Am găsit mai multe soluții: o regiune poate fi citită greșit.",n,palette.size)
+        return Scan(Result(solution,found,board),"Soluție "+n+"×"+n,n,palette.size)
     }
 
     /** Each colored zone of the original puzzle should form one contiguous region. */
