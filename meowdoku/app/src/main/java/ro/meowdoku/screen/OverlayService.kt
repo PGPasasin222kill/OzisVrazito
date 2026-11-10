@@ -14,6 +14,10 @@ import android.widget.*
 import kotlin.math.roundToInt
 
 class OverlayService: Service() {
+    companion object {
+        const val ACTION_CLEAR = "ro.meowdoku.screen.CLEAR_OVERLAY"
+        const val ACTION_STOP = "ro.meowdoku.screen.STOP_OVERLAY"
+    }
     private lateinit var wm: WindowManager
     private var projection:MediaProjection?=null
     private var display:VirtualDisplay?=null
@@ -38,12 +42,35 @@ class OverlayService: Service() {
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
     }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
+        // System UI / app emergency commands work without asking for screen share again.
+        if (intent?.action==ACTION_STOP) {
+            scanGeneration++
+            scanBusy=false
+            clearMarks()
+            controls?.visibility=View.VISIBLE
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action==ACTION_CLEAR) {
+            scanGeneration++
+            scanBusy=false
+            clearMarks()
+            controls?.visibility=View.VISIBLE
+            return START_NOT_STICKY
+        }
         // Only one capture session and one set of controls may exist.
         if (controls != null) return START_NOT_STICKY
+        val stopIntent=Intent(this,OverlayService::class.java).setAction(ACTION_STOP)
+        val stopPending=PendingIntent.getService(
+            this, 99, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val notice=Notification.Builder(this,"capture")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("Meowdoku Screen Solver")
-            .setContentText("Captura activă. Apasă MEOW ca să scanezi.")
+            .setContentText("Captură activă — poți opri solverul de aici.")
+            .addAction(Notification.Action.Builder(
+                android.R.drawable.ic_menu_close_clear_cancel,"OPREȘTE",stopPending
+            ).build())
             .build()
         if(Build.VERSION.SDK_INT>=29) {
             startForeground(11,notice,android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
@@ -194,6 +221,11 @@ class OverlayService: Service() {
         sizeRow.addView(menuButton("+") { updateSize(4) },
             LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f))
         menu.addView(sizeRow)
+        menu.addView(menuButton("SETĂRI COMPLETE") {
+            menu.visibility=View.GONE
+            startActivity(Intent(this,MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        })
         menu.addView(menuButton("STOP") {
             scanGeneration++
             scanBusy=false
