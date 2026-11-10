@@ -413,82 +413,221 @@ class OverlayService: Service() {
         // Allow time for WindowManager to remove the previous image from the captured screen.
         handler.postDelayed({ if (!stopped && id==scanGeneration) capture(0,id) },650)
     }
-    private fun capture(attempt:Int=0, id:Int) {
-        if (stopped || id!=scanGeneration) return
+    private fun imageBitmap(img:android.media.Image):Bitmap? = try {
+        val p=img.planes[0]
+        val pixel=p.pixelStride
+        val row=p.rowStride
+        val paddedWidth=width+(row-pixel*width)/pixel
+        val padded=Bitmap.createBitmap(paddedWidth,height,Bitmap.Config.ARGB_8888)
+        padded.copyPixelsFromBuffer(p.buffer)
+        val cropped=Bitmap.createBitmap(padded,0,0,width,height)
+        padded.recycle()
+        cropped
+    } catch(_:Exception) { null }
+
+    // Tile corner samples are outside the middle where markers and cats appear.
+    private fun boardFingerprint(bmp:Bitmap,board:Puzzle.Board,n:Int):IntArray {
+        val w=(board.right-board.left+1f)/n
+        val h=(board.bottom-board.top+1f)/n
+        return IntArray(n*n) { index ->
+            val r=index/n
+            val col=index%n
+            val x=(board.left+(col+.2f)*w).toInt().coerceIn(0,bmp.width-1)
+            val y=(board.top+(r+.2f)*h).toInt().coerceIn(0,bmp.height-1)
+            val pixel=bmp.getPixel(x,y)
+            val red=Color.red(pixel) shr 4
+            val green=Color.green(pixel) shr 4
+            val blue=Color.blue(pixel) shr 4
+            (red shl 8) or (green shl 4) or blue
+        }
+    }
+
+    private fun watchLevelChange(id:Int, board:Puzzle.Board, n:Int) {
+        if(!UserPrefs.autoHideLevelChange(this) || signature==null) return
+        monitorJob?.let { handler.removeCallbacks(it) }
+        val check=object:Runnable {
+            override fun run() {
+                if(stopped || id!=scanGeneration || overlay==null || scanBusy) return
+                val img=reader?.acquireLatestImage()
+                if(img!=null) {
+                    val image=try { imageBitmap(img) } finally { img.close() }
+                    if(image!=null) {
+                        try {
+                            val current=boardFingerprint(image,board,n)
+                            val old=signature
+                            if(old!=null && old.size==current.size) {
+                                val count=old.indices.count {
+                                    val a=old[it]; val b=current[it]
+                                    val dr=abs((a shr 8)-(b shr 8))
+                                    val dg=abs(((a shr 4) and 15)-((b shr 4) and 15))
+                                    val db=abs((a and 15)-(b and 15))
+                                    dr+dg+db>=4
+                                }
+                                // Two different consecutive frames avoid transient animations.
+                                if(count>=maxOf(4,n*n/4)) changeFrames++ else changeFrames=0
+                                if(changeFrames>=2) {
+                                    clearMarks()
+                                    setStatus("Tabla s-a schimbat: am ascuns marcajele vechi.")
+                                    return
+                                }
+                            }
+                        } catch(_:Exception) {} finally { image.recycle() }
+                    }
+                }
+                if(!stopped && id==scanGeneration && overlay!=null) {
+                    handler.postDelayed(this,2300L)
+                }
+            }
+        }
+        monitorJob=check
+        handler.postDelayed(check,2300L)
+    }
+
+    private fun confirmPreview(id:Int) {
+        if(stopped || id!=scanGeneration || overlay==null)return
+        clearJob?.let { handler.removeCallbacks(it) }
+        clearJob=null
+        previewButtons?.let { try { wm.removeViewImmediate(it) } catch(_:Exception) {} }
+        previewButtons=null
+        overlay?.confirm()
+        val result=lastResult ?: return
+        setStatus("Confirmat: "+result.size+" marcaje. Ascunde din ⚙ sau notificare.")
+        val duration=UserPrefs.duration(this)
+        if(duration>0) {
+            val expiration=Runnable {
+                if(!stopped && id==scanGeneration) {
+                    clearMarks()
+                    setStatus("Marcajele au dispărut.")
+                }
+            }
+            clearJob=expiration
+            handler.postDelayed(expiration,duration*1000L)
+        }
+        appToast(if(duration>0) "Soluție confirmată: "+duration+" secunde."
+            else "Soluție confirmată. Ascunde manual din ⚙.")
+        watchLevelChange(id,result.board,result.size)
+    }
+
+    private fun showPreview(id:Int, result:Puzzle.Result) {
+        val panel=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(8),dp(5),dp(8),dp(8))
+            setBackgroundColor(Color.argb(241,34,35,48))
+        }
+        panel.addView(TextView(this).apply {
+            text="PREVIZUALIZARE "+result.size+"×"+result.size+" • verifică marcajele"
+            textSize=13f
+            setTextColor(Color.WHITE)
+        })
+        val actions=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        actions.addView(Button(this).apply {
+            text="CONFIRMĂ"
+            setOnClickListener { confirmPreview(id) }
+        })
+        actions.addView(Button(this).apply {
+            text="ANULEAZĂ"
+            setOnClickListener {
+                if(id==scanGeneration) {
+                    scanGeneration++
+                    clearMarks()
+                    setStatus("Previzualizare anulată.")
+                }
+            }
+        })
+        panel.addView(actions)
+        val p=WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity=Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y=(result.board.top-dp(96)).coerceAtLeast(dp(55))
+        }
+        previewButtons=panel
+        wm.addView(panel,p)
+        val expiration=Runnable {
+            if(!stopped && id==scanGeneration && overlay?.preview==true) {
+                clearMarks()
+                setStatus("Previzualizarea a expirat.")
+            }
+        }
+        clearJob=expiration
+        handler.postDelayed(expiration,45000L)
+    }
+
+    private fun displayResult(id:Int,result:Puzzle.Result,fingerprint:IntArray?) {
+        if(stopped || id!=scanGeneration) return
+        clearMarks()
+        lastResult=result
+        signature=fingerprint
+        val shouldPreview=UserPrefs.previewEnabled(this)
+        val marks=MarkerView(this,result.columns,result.board,
+            UserPrefs.starOpacity(this),UserPrefs.markerShape(this),
+            UserPrefs.markerColor(this),shouldPreview)
+        val params=WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity=Gravity.TOP or Gravity.START
+            // Keep the window below Android's obscured-touch threshold.
+            alpha=0.79f
+        }
+        overlay=marks
+        wm.addView(marks,params)
+        if(shouldPreview) {
+            setStatus("Previzualizare: confirmă sau anulează cele "+result.size+" marcaje.")
+            showPreview(id,result)
+        } else confirmPreview(id)
+    }
+
+    private fun capture(attempt:Int=0,id:Int) {
+        if(stopped || id!=scanGeneration)return
         val img=reader?.acquireLatestImage()
         if(img==null) {
-            if(attempt<8) {
-                handler.postDelayed({ capture(attempt+1,id) },180)
-            } else {
+            if(attempt<8) handler.postDelayed({ capture(attempt+1,id) },180)
+            else {
                 scanBusy=false
                 controls?.visibility=View.VISIBLE
                 setStatus("Nu am primit captura. Încearcă din nou.")
+                UserPrefs.saveDiagnosis(this,"Nu am primit captura de ecran.",0,0)
             }
             return
         }
-        val bitmap=try {
-            val p=img.planes[0]
-            val pixel=p.pixelStride
-            val row=p.rowStride
-            val padded=Bitmap.createBitmap(width+(row-pixel*width)/pixel,height,Bitmap.Config.ARGB_8888)
-            padded.copyPixelsFromBuffer(p.buffer)
-            val cropped=Bitmap.createBitmap(padded,0,0,width,height)
-            padded.recycle()
-            cropped
-        } catch(e:Exception) { null } finally { img.close() }
+        val bitmap=try { imageBitmap(img) } finally { img.close() }
         controls?.visibility=View.VISIBLE
         if(bitmap==null) {
             scanBusy=false
             setStatus("Nu pot citi captura ecranului.")
+            UserPrefs.saveDiagnosis(this,"Nu pot citi captura ecranului.",0,0)
             return
         }
         setStatus("Scanez tabla...")
         Thread {
-            val scan=try { Puzzle.detect(bitmap,UserPrefs.verifyResult(this)) }
-                catch(e:Exception) { Puzzle.Scan(null,"Eroare la scanare: "+e.javaClass.simpleName) }
+            val scan=try {
+                Puzzle.detect(bitmap,UserPrefs.verifyResult(this),
+                    UserPrefs.manualBoard(this,width,height))
+            } catch(e:Exception) {
+                Puzzle.Scan(null,"Eroare scanare: "+e.javaClass.simpleName)
+            }
+            val fp=try {
+                scan.result?.let { boardFingerprint(bitmap,it.board,it.size) }
+            } catch(_:Exception) { null }
             bitmap.recycle()
             handler.post {
-                if (stopped || id!=scanGeneration) return@post
+                if(stopped || id!=scanGeneration)return@post
                 scanBusy=false
-                val result=scan.result
-                if(result==null) {
+                UserPrefs.saveDiagnosis(this,scan.message,scan.gridSize,scan.colors)
+                if(scan.result==null) {
                     setStatus(scan.message)
                     appToast(scan.message,true)
-                    return@post
+                } else {
+                    displayResult(id,scan.result,fp)
                 }
-                // Never stack windows: one puzzle => exactly N stars.
-                clearMarks()
-                val marks=MarksView(this,result.columns,result.board,UserPrefs.starOpacity(this))
-                val params=WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSLUCENT
-                ).apply {
-                    gravity=Gravity.TOP or Gravity.START
-                    // Android 12+ blocks touch pass-through from untrusted
-                    // overlays if window opacity exceeds 0.8. 0.65 keeps
-                    // stars visible while allowing taps on the game below.
-                    alpha=0.79f
-                }
-                overlay=marks
-                wm.addView(marks,params)
-                setStatus(scan.message+" — "+result.size+" steluțe")
-                // Marks disappear automatically, even if user forgets to press Hide.
-                val duration=UserPrefs.duration(this)
-                if(duration>0) {
-                    val expiration=Runnable {
-                        if(!stopped && id==scanGeneration) {
-                            clearMarks()
-                            setStatus("Marcajele au dispărut. Apasă MEOW pentru alt nivel.")
-                        }
-                    }
-                    clearJob=expiration
-                    handler.postDelayed(expiration,duration*1000L)
-                }
-                appToast(if(duration>0) "Gata: "+result.size+"×"+result.size+" — "+duration+" secunde"
-                    else "Gata: "+result.size+"×"+result.size+" — ascunde manual din ⚙")
             }
         }.start()
     }
