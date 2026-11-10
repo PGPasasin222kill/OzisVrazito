@@ -43,7 +43,7 @@ class OverlayService: Service() {
         } else startForeground(11,notice)
         val token=if(Build.VERSION.SDK_INT>=33)
             intent?.getParcelableExtra("resultData",Intent::class.java)
-        else @Suppress("DEPRECATION") (intent?.getParcelableExtra("resultData") as? Intent)
+        else intent?.getParcelableExtra<Intent>("resultData")
         if(token==null) { stopSelf(); return START_NOT_STICKY }
         val m=getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection=m.getMediaProjection(intent?.getIntExtra("resultCode",Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED,token)
@@ -51,7 +51,6 @@ class OverlayService: Service() {
             override fun onStop() { handler.post { stopSelf() } }
         },handler)
         val metrics=android.util.DisplayMetrics()
-        @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(metrics)
         width=metrics.widthPixels
         height=metrics.heightPixels
