@@ -22,6 +22,10 @@ class OverlayService: Service() {
     private var overlay:MarksView?=null
     private var statusText:TextView?=null
     private val handler=Handler(Looper.getMainLooper())
+    private var scanBusy=false
+    private var stopped=false
+    private var scanGeneration=0
+    private var clearJob:Runnable?=null
     private var width=0
     private var height=0
     private var density=0
@@ -34,6 +38,8 @@ class OverlayService: Service() {
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
     }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
+        // Only one capture session and one set of controls may exist.
+        if (controls != null) return START_NOT_STICKY
         val notice=Notification.Builder(this,"capture")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("Meowdoku Screen Solver")
@@ -81,8 +87,23 @@ class OverlayService: Service() {
         container.addView(info)
         statusText=info
         container.addView(Button(this).apply {
+            text="ASCUNDE ★"
+            setOnClickListener {
+                // Invalidate any in-flight scan so it cannot redisplay old stars.
+                scanGeneration++
+                scanBusy=false
+                clearMarks()
+                statusText?.text="Steluțele au fost ascunse."
+            }
+        })
+        container.addView(Button(this).apply {
             text="STOP"
-            setOnClickListener { stopSelf() }
+            setOnClickListener {
+                scanGeneration++
+                scanBusy=false
+                clearMarks()
+                stopSelf()
+            }
         })
         val params=WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,
@@ -92,15 +113,33 @@ class OverlayService: Service() {
         controls=container
         wm.addView(container,params)
     }
-    private fun scan() {
-        overlay?.let { wm.removeView(it); overlay=null }
-        // Let the screen refresh after removing the old marks.
-        handler.postDelayed({ capture() },350)
+    private fun clearMarks() {
+        clearJob?.let { handler.removeCallbacks(it) }
+        clearJob=null
+        overlay?.let {
+            try { wm.removeViewImmediate(it) } catch (_:Exception) { }
+        }
+        overlay=null
     }
-    private fun capture(attempt:Int=0) {
+    private fun scan() {
+        if (stopped || scanBusy) return
+        scanBusy=true
+        val id=++scanGeneration
+        clearMarks()
+        statusText?.text="Scanez..."
+        // Allow time for WindowManager to remove the previous image from the captured screen.
+        handler.postDelayed({ if (!stopped && id==scanGeneration) capture(0,id) },650)
+    }
+    private fun capture(attempt:Int=0, id:Int) {
+        if (stopped || id!=scanGeneration) return
         val img=reader?.acquireLatestImage()
         if(img==null) {
-            if(attempt<8) handler.postDelayed({capture(attempt+1)},180)
+            if(attempt<8) {
+                handler.postDelayed({ capture(attempt+1,id) },180)
+            } else {
+                scanBusy=false
+                statusText?.text="Nu am primit captura. Încearcă din nou."
+            }
             return
         }
         val bitmap=try {
@@ -114,6 +153,7 @@ class OverlayService: Service() {
             cropped
         } catch(e:Exception) { null } finally { img.close() }
         if(bitmap==null) {
+            scanBusy=false
             statusText?.text="Nu pot citi captura ecranului."
             return
         }
@@ -123,12 +163,16 @@ class OverlayService: Service() {
                 catch(e:Exception) { Puzzle.Scan(null,"Eroare la scanare: "+e.javaClass.simpleName) }
             bitmap.recycle()
             handler.post {
+                if (stopped || id!=scanGeneration) return@post
+                scanBusy=false
                 val result=scan.result
                 if(result==null) {
                     statusText?.text=scan.message
                     Toast.makeText(this,scan.message,Toast.LENGTH_LONG).show()
                     return@post
                 }
+                // Never stack windows: one puzzle => exactly N stars.
+                clearMarks()
                 val marks=MarksView(this,result.columns,result.board)
                 val params=WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
@@ -139,14 +183,26 @@ class OverlayService: Service() {
                 ).apply { gravity=Gravity.TOP or Gravity.START }
                 overlay=marks
                 wm.addView(marks,params)
-                statusText?.text=scan.message+" — steluțele sunt afișate"
-                Toast.makeText(this,"Gata: "+result.size+"×"+result.size,Toast.LENGTH_SHORT).show()
+                statusText?.text=scan.message+" — "+result.size+" steluțe"
+                // Marks disappear automatically, even if user forgets to press Hide.
+                val expiration=Runnable {
+                    clearMarks()
+                    statusText?.text="Steluțele au dispărut. Apasă MEOW pentru alt nivel."
+                }
+                clearJob=expiration
+                handler.postDelayed(expiration,20000L)
+                Toast.makeText(this,"Gata: "+result.size+"×"+result.size+" — marcajele dispar în 20 sec.",Toast.LENGTH_SHORT).show()
             }
         }.start()
     }
     override fun onDestroy() {
-        controls?.let { wm.removeView(it) }
-        overlay?.let { wm.removeView(it) }
+        stopped=true
+        scanGeneration++
+        scanBusy=false
+        clearMarks()
+        controls?.let { try { wm.removeViewImmediate(it) } catch (_:Exception) { } }
+        controls=null
+        handler.removeCallbacksAndMessages(null)
         display?.release()
         reader?.close()
         projection?.stop()
