@@ -16,6 +16,8 @@ import kotlin.math.roundToInt
 class OverlayService: Service() {
     companion object {
         const val ACTION_CLEAR = "ro.meowdoku.screen.CLEAR_OVERLAY"
+        const val ACTION_SCAN = "ro.meowdoku.screen.SCAN"
+        const val ACTION_CALIBRATE = "ro.meowdoku.screen.CALIBRATE"
         const val ACTION_STOP = "ro.meowdoku.screen.STOP_OVERLAY"
     }
     private lateinit var wm: WindowManager
@@ -23,7 +25,14 @@ class OverlayService: Service() {
     private var display:VirtualDisplay?=null
     private var reader:ImageReader?=null
     private var controls:View?=null
-    private var overlay:MarksView?=null
+    private var overlay:MarkerView?=null
+    private var previewButtons:View?=null
+    private var calibrationView:CalibrationView?=null
+    private var calibrationButtons:View?=null
+    private var lastResult:Puzzle.Result?=null
+    private var signature:IntArray?=null
+    private var monitorJob:Runnable?=null
+    private var changeFrames=0
     private var statusText:TextView?=null
     private val handler=Handler(Looper.getMainLooper())
     private var scanBusy=false
@@ -47,6 +56,7 @@ class OverlayService: Service() {
             scanGeneration++
             scanBusy=false
             clearMarks()
+            stopCalibration(false)
             controls?.visibility=View.VISIBLE
             stopSelf()
             return START_NOT_STICKY
@@ -55,22 +65,34 @@ class OverlayService: Service() {
             scanGeneration++
             scanBusy=false
             clearMarks()
+            stopCalibration(false)
             controls?.visibility=View.VISIBLE
+            if(projection==null) stopSelf()
+            return START_NOT_STICKY
+        }
+        if(intent?.action==ACTION_SCAN) {
+            if(projection!=null) scan() else stopSelf()
+            return START_NOT_STICKY
+        }
+        if(intent?.action==ACTION_CALIBRATE) {
+            if(projection!=null) beginCalibration() else stopSelf()
             return START_NOT_STICKY
         }
         // Only one capture session and one set of controls may exist.
         if (controls != null) return START_NOT_STICKY
-        val stopIntent=Intent(this,OverlayService::class.java).setAction(ACTION_STOP)
-        val stopPending=PendingIntent.getService(
-            this, 99, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        fun pending(action:String, request:Int)=PendingIntent.getService(
+            this,request,Intent(this,OverlayService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notice=Notification.Builder(this,"capture")
             .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentTitle("Meowdoku Screen Solver")
-            .setContentText("Captură activă — poți opri solverul de aici.")
+            .setContentTitle("Meowdoku Screen Solver v1.0")
+            .setContentText("Captura activă • SCAN / ASCUNDE / OPREȘTE")
             .addAction(Notification.Action.Builder(
-                android.R.drawable.ic_menu_close_clear_cancel,"OPREȘTE",stopPending
-            ).build())
+                android.R.drawable.ic_menu_search,"SCANEAZĂ",pending(ACTION_SCAN,101)).build())
+            .addAction(Notification.Action.Builder(
+                android.R.drawable.ic_menu_close_clear_cancel,"ASCUNDE",pending(ACTION_CLEAR,102)).build())
+            .addAction(Notification.Action.Builder(
+                android.R.drawable.ic_delete,"OPREȘTE",pending(ACTION_STOP,103)).build())
             .build()
         if(Build.VERSION.SDK_INT>=29) {
             startForeground(11,notice,android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
@@ -295,6 +317,12 @@ class OverlayService: Service() {
         allowDragging(gearButton)
     }
     private fun clearMarks() {
+        monitorJob?.let { handler.removeCallbacks(it) }
+        monitorJob=null
+        signature=null
+        changeFrames=0
+        previewButtons?.let { try { wm.removeViewImmediate(it) } catch(_:Exception) {} }
+        previewButtons=null
         clearJob?.let { handler.removeCallbacks(it) }
         clearJob=null
         overlay?.let {
@@ -394,6 +422,7 @@ class OverlayService: Service() {
     }
     override fun onDestroy() {
         stopped=true
+        stopCalibration(false)
         scanGeneration++
         scanBusy=false
         clearMarks()
