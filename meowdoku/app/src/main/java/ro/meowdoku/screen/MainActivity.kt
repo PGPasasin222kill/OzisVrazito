@@ -21,7 +21,7 @@ class MainActivity: Activity() {
             gravity=Gravity.CENTER
         }
         layout.addView(TextView(this).apply {
-            text="Meowdoku Screen Solver\n\nButon plutitor MEOW • grilă 10×10\nScanează tabla și arată stelele peste joc.\nNu apasă automat."
+            text="Meowdoku Screen Solver\n\nButon plutitor MEOW • dimensiune detectată automat\nScanează tabla și arată stelele peste joc.\nNu apasă automat."
             textSize=20f
             gravity=Gravity.CENTER
         })
@@ -30,7 +30,7 @@ class MainActivity: Activity() {
             setOnClickListener { begin() }
         })
         layout.addView(TextView(this).apply {
-            text="Permite afișarea peste alte aplicații și partajarea ecranului.\nDupă pornire, intră în joc și apasă MEOW.\nRecunoașterea este experimentală, calibrată după captura nivelului 66."
+            text="Permite afișarea peste alte aplicații și partajarea ecranului.\nDupă pornire, intră în joc și apasă MEOW.\nRecunoașterea este experimentală: identifică automat tabla, rândurile, coloanele și culorile."
             gravity=Gravity.CENTER
         })
         setContentView(layout)
