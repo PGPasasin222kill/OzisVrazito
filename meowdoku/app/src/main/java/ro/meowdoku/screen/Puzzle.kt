@@ -28,7 +28,7 @@ object Puzzle {
         .16f to .50f, .84f to .50f, .50f to .16f, .50f to .84f
     )
 
-    fun detect(bitmap: Bitmap): Scan {
+    fun detect(bitmap: Bitmap, strict: Boolean = true): Scan {
         val w = bitmap.width
         val h = bitmap.height
         if (w < 200 || h < 250) return Scan(null, "Captură prea mică.")
@@ -180,6 +180,10 @@ object Puzzle {
             }
             if (best < 1500) regions[i] = index
         }
+        // Optional confidence gate: reject screenshots with too many uncertain cells.
+        val unknownBeforeFill=regions.count { it<0 }
+        if(strict && unknownBeforeFill>maxOf(2,n*n/15))
+            return Scan(null,"Prea multe căsuțe sunt acoperite. Mută butonul MEOW și încearcă din nou.")
         // If a portion of a colored cell was covered, infer from its neighbors.
         repeat(n) {
             for (i in regions.indices) {
@@ -197,6 +201,8 @@ object Puzzle {
         }
         if (regions.any { it<0 } || regions.toSet().size != n)
             return Scan(null, "Unele regiuni sunt acoperite sau culorile nu sunt clare.")
+        if(strict && !regionsConnected(regions,n))
+            return Scan(null, "Verificarea a găsit regiuni neclare. Reîncearcă pe tabla complet vizibilă.")
 
         val sol = IntArray(n) { -1 }
         var found=0
@@ -230,6 +236,39 @@ object Puzzle {
         val solution=first ?: return Scan(null,"Nu găsesc o soluție: verifică dacă tabla e complet vizibilă.")
         if (found!=1) return Scan(null,"Am găsit mai multe soluții: o regiune poate fi citită greșit.")
         return Scan(Result(solution,found,board),"Soluție "+n+"×"+n)
+    }
+
+    /** Each colored zone of the original puzzle should form one contiguous region. */
+    private fun regionsConnected(regions:IntArray, n:Int):Boolean {
+        for (region in 0 until n) {
+            val first=regions.indexOfFirst { it==region }
+            if(first<0)return false
+            val queue=IntArray(n*n)
+            val seen=BooleanArray(n*n)
+            var front=0
+            var end=1
+            queue[0]=first
+            seen[first]=true
+            while(front<end) {
+                val at=queue[front++]
+                val row=at/n
+                val col=at%n
+                val neighbors=intArrayOf(
+                    if(row>0) at-n else -1,
+                    if(row<n-1) at+n else -1,
+                    if(col>0) at-1 else -1,
+                    if(col<n-1) at+1 else -1
+                )
+                for(next in neighbors) {
+                    if(next>=0 && !seen[next] && regions[next]==region) {
+                        seen[next]=true
+                        queue[end++]=next
+                    }
+                }
+            }
+            if(end!=regions.count { it==region })return false
+        }
+        return true
     }
 
     private fun saturation(c: Int) = maxOf(Color.red(c),Color.green(c),Color.blue(c)) -
