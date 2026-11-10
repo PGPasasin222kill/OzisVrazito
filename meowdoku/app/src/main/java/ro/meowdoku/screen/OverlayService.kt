@@ -180,7 +180,13 @@ class OverlayService: Service() {
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                     PixelFormat.TRANSLUCENT
-                ).apply { gravity=Gravity.TOP or Gravity.START }
+                ).apply {
+                    gravity=Gravity.TOP or Gravity.START
+                    // Android 12+ blocks touch pass-through from untrusted
+                    // overlays if window opacity exceeds 0.8. 0.65 keeps
+                    // stars visible while allowing taps on the game below.
+                    alpha=0.65f
+                }
                 overlay=marks
                 wm.addView(marks,params)
                 statusText?.text=scan.message+" — "+result.size+" steluțe"
