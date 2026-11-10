@@ -289,7 +289,7 @@ class OverlayService: Service() {
                 }
                 overlay=marks
                 wm.addView(marks,params)
-                setStatus(scan.message)+" — "+result.size+" steluțe"
+                setStatus(scan.message+" — "+result.size+" steluțe")
                 // Marks disappear automatically, even if user forgets to press Hide.
                 val expiration=Runnable {
                     clearMarks()
