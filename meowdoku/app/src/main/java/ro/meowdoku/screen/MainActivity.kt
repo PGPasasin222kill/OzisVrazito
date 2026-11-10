@@ -2,6 +2,7 @@ package ro.meowdoku.screen
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Color
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
@@ -20,6 +21,7 @@ import android.widget.TextView
 
 class MainActivity: Activity() {
     private val requestScreenCapture=10
+    private var diagnosticsView:TextView?=null
     private fun dp(value:Int)=(value*resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState:Bundle?) {
@@ -34,7 +36,7 @@ class MainActivity: Activity() {
             setPadding(0,dp(14),0,dp(5))
         }
         panel.addView(title("🐱 Meowdoku Screen Solver",23f).apply { gravity=Gravity.CENTER })
-        panel.addView(title("VERSIUNEA 0.3 • Setări complete",14f).apply { gravity=Gravity.CENTER })
+        panel.addView(title("VERSIUNEA 1.0 • Setări complete",14f).apply { gravity=Gravity.CENTER })
         panel.addView(title("Scanare automată a oricărei grile detectabile. Butonul 🐱 este rotund și se poate trage.",14f).apply {
             gravity=Gravity.CENTER
         })
@@ -52,6 +54,27 @@ class MainActivity: Activity() {
         })
         panel.addView(title("SETĂRI",20f))
         panel.addView(title("Detectare automată: ACTIVĂ. Nu trebuie aleasă dimensiunea.",14f))
+        panel.addView(Button(this).apply {
+            text="CALIBRARE DIRECT PE TABLĂ"
+            setOnClickListener {
+                sendServiceCommand(OverlayService.ACTION_CALIBRATE)
+                moveTaskToBack(true)
+            }
+        })
+        panel.addView(Button(this).apply {
+            text="ȘTERGE CALIBRAREA (revino la detectarea automată)"
+            setOnClickListener { UserPrefs.clearManualBoard(this@MainActivity) }
+        })
+        panel.addView(Switch(this).apply {
+            text="Previzualizare și confirmare înainte de afișare"
+            isChecked=UserPrefs.previewEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _,v -> UserPrefs.setPreviewEnabled(this@MainActivity,v) }
+        })
+        panel.addView(Switch(this).apply {
+            text="Ascunde automat marcajele când se schimbă nivelul"
+            isChecked=UserPrefs.autoHideLevelChange(this@MainActivity)
+            setOnCheckedChangeListener { _,v -> UserPrefs.setAutoHideLevelChange(this@MainActivity,v) }
+        })
         panel.addView(Switch(this).apply {
             text="Verifică tabla și soluția înainte să afișeze steluțe"
             textSize=15f
@@ -82,6 +105,36 @@ class MainActivity: Activity() {
                 override fun onStartTrackingTouch(seek:SeekBar?) {}
                 override fun onStopTrackingTouch(seek:SeekBar?) {}
             })
+        })
+        panel.addView(title("Personalizarea marcajelor",18f))
+        panel.addView(title("Forma marcajelor"))
+        val shapes=listOf("Steluțe ★","Puncte ●","Cercuri ○","Pisicuțe 🐱")
+        panel.addView(Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_item,shapes).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setSelection(UserPrefs.markerShape(this@MainActivity))
+            onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p:AdapterView<*>?,v:View?,position:Int,id:Long) {
+                    UserPrefs.setMarkerShape(this@MainActivity,position)
+                }
+                override fun onNothingSelected(p:AdapterView<*>?) {}
+            }
+        })
+        panel.addView(title("Culoarea marcajelor"))
+        val colors=listOf(Color.YELLOW,Color.GREEN,Color.RED,Color.CYAN,Color.WHITE,Color.MAGENTA)
+        val colorNames=listOf("Galben","Verde","Roșu","Cyan","Alb","Mov")
+        panel.addView(Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_item,colorNames).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setSelection(colors.indexOf(UserPrefs.markerColor(this@MainActivity)).coerceAtLeast(0))
+            onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p:AdapterView<*>?,v:View?,position:Int,id:Long) {
+                    UserPrefs.setMarkerColor(this@MainActivity,colors[position])
+                }
+                override fun onNothingSelected(p:AdapterView<*>?) {}
+            }
         })
         panel.addView(title("Durata marcajelor",16f))
         val choices=listOf(3,5,10,20,0)
@@ -119,8 +172,22 @@ class MainActivity: Activity() {
             setOnClickListener { UserPrefs.saveOverlayPosition(this@MainActivity,-1,-1) }
         })
         panel.addView(title("Setările marcajelor se aplică la următoarea scanare. Mărimea butoanelor se aplică la următoarea pornire. ⚙ deschide ASCUNDE ★ și STOP.",13f))
+        panel.addView(title("DIAGNOSTIC",20f))
+        diagnosticsView=title(UserPrefs.diagnosis(this),14f)
+        panel.addView(diagnosticsView)
+        panel.addView(Button(this).apply {
+            text="Actualizează diagnosticul"
+            setOnClickListener { diagnosticsView?.text=UserPrefs.diagnosis(this@MainActivity) }
+        })
+        panel.addView(title("Notificare: SCANEAZĂ / ASCUNDE / OPREȘTE — funcționează când captura este activă.",14f))
+        panel.addView(title("Plan viitor: auto-solver opțional cu acord explicit. Versiunea 1.0 nu apasă automat.",13f))
         panel.addView(title("Permisiunile de captură, notificarea obligatorie a serviciului și avertizările Samsung sunt generate de Android și nu pot fi dezactivate prin aplicație.",12f))
         setContentView(ScrollView(this).apply { addView(panel) })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        diagnosticsView?.text=UserPrefs.diagnosis(this)
     }
 
     private fun sendServiceCommand(action:String) {
