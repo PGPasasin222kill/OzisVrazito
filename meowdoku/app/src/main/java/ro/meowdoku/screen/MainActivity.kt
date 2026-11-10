@@ -6,34 +6,81 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
-import android.view.Gravity
 
 class MainActivity: Activity() {
     private val code = 10
-    override fun onCreate(savedInstanceState:Bundle?) {
+    private fun dp(value:Int) = (value*resources.displayMetrics.density).toInt()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val layout=LinearLayout(this).apply {
+        val panel=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
-            setPadding(30,50,30,30)
-            gravity=Gravity.CENTER
+            setPadding(dp(22),dp(40),dp(22),dp(24))
         }
-        layout.addView(TextView(this).apply {
-            text="Meowdoku Screen Solver\n\nButon plutitor MEOW • dimensiune detectată automat\nScanează tabla și arată stelele peste joc.\nNu apasă automat."
-            textSize=20f
+        panel.addView(TextView(this).apply {
+            text="🐱 Meowdoku Screen Solver"
+            textSize=24f
             gravity=Gravity.CENTER
         })
-        layout.addView(Button(this).apply {
-            text="Pornește MEOW"
+        panel.addView(TextView(this).apply {
+            text="Scanează tabla și arată pisicile direct peste joc."
+            textSize=15f
+            setPadding(0,dp(14),0,dp(18))
+            gravity=Gravity.CENTER
+        })
+        panel.addView(Button(this).apply {
+            text="Pornește MEOW peste joc"
             setOnClickListener { begin() }
         })
-        layout.addView(TextView(this).apply {
-            text="Permite afișarea peste alte aplicații și partajarea ecranului.\nDupă pornire, intră în joc și apasă MEOW.\nRecunoașterea este experimentală: identifică automat tabla, rândurile, coloanele și culorile."
-            gravity=Gravity.CENTER
+        panel.addView(TextView(this).apply {
+            text="Setări"
+            textSize=22f
+            setPadding(0,dp(26),0,dp(10))
         })
-        setContentView(layout)
+        panel.addView(Switch(this).apply {
+            text="Afișează mesaje (sub MEOW și notificări scurte)"
+            textSize=15f
+            isChecked=UserPrefs.showMessages(this@MainActivity)
+            setOnCheckedChangeListener { _, enabled ->
+                UserPrefs.setShowMessages(this@MainActivity,enabled)
+            }
+        })
+        val sizeText=TextView(this).apply {
+            textSize=16f
+            setPadding(0,dp(22),0,dp(4))
+            text="Mărimea butonului: ${UserPrefs.sizeDp(this@MainActivity)} dp"
+        }
+        panel.addView(sizeText)
+        panel.addView(SeekBar(this).apply {
+            max=28 // 36..64dp; changes to the floating buttons apply next time they start
+            progress=UserPrefs.sizeDp(this@MainActivity)-36
+            setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar:SeekBar?, value:Int, fromUser:Boolean) {
+                    val size=36+value
+                    sizeText.text="Mărimea butonului: $size dp"
+                    if(fromUser) UserPrefs.setSizeDp(this@MainActivity,size)
+                }
+                override fun onStartTrackingTouch(bar:SeekBar?) {}
+                override fun onStopTrackingTouch(bar:SeekBar?) {}
+            })
+        })
+        panel.addView(TextView(this).apply {
+            text="În joc: 🐱 scanează, ⚙ deschide meniul, ASCUNDE ★ șterge marcajele. Modificările de mărime se aplică la următoarea pornire."
+            textSize=14f
+            setPadding(0,dp(12),0,dp(15))
+        })
+        panel.addView(TextView(this).apply {
+            text="Notă: mesajele Android/Samsung despre permisiuni sau compatibilitate sunt generate de sistem și nu pot fi dezactivate din aceste setări. Mesajele aplicației pot fi ascunse."
+            textSize=13f
+        })
+        setContentView(ScrollView(this).apply { addView(panel) })
     }
     private fun begin() {
         if (!Settings.canDrawOverlays(this)) {
