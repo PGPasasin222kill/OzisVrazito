@@ -243,6 +243,10 @@ class OverlayService: Service() {
         sizeRow.addView(menuButton("+") { updateSize(4) },
             LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f))
         menu.addView(sizeRow)
+        menu.addView(menuButton("CALIBREAZĂ TABLA") {
+            menu.visibility=View.GONE
+            beginCalibration()
+        })
         menu.addView(menuButton("SETĂRI COMPLETE") {
             menu.visibility=View.GONE
             startActivity(Intent(this,MainActivity::class.java)
@@ -316,6 +320,73 @@ class OverlayService: Service() {
         allowDragging(scanButton)
         allowDragging(gearButton)
     }
+    private fun beginCalibration() {
+        if(stopped || projection==null) return
+        scanGeneration++
+        scanBusy=false
+        clearMarks()
+        stopCalibration(false)
+        controls?.visibility=View.GONE
+        val saved=UserPrefs.manualBoard(this,width,height)
+        val original=saved ?: lastResult?.board ?: run {
+            val margin=(width*.045f).toInt()
+            val side=width-2*margin
+            val top=((height-side)/2).coerceAtLeast(0)
+            Puzzle.Board(margin,top,width-margin,top+side)
+        }
+        val frame=CalibrationView(this,original,width,height)
+        val surface=WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity=Gravity.TOP or Gravity.START }
+        calibrationView=frame
+        wm.addView(frame,surface)
+        val panel=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(10),dp(8),dp(10),dp(8))
+            setBackgroundColor(Color.argb(240,39,39,50))
+        }
+        panel.addView(TextView(this).apply {
+            text="Trage punctele 1 și 2 pe colțurile tablei. Sau mută dreptunghiul."
+            textSize=13f
+            setTextColor(Color.WHITE)
+        })
+        val buttons=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        buttons.addView(Button(this).apply {
+            text="SALVEAZĂ"
+            setOnClickListener { stopCalibration(true) }
+        })
+        buttons.addView(Button(this).apply {
+            text="ANULEAZĂ"
+            setOnClickListener { stopCalibration(false) }
+        })
+        panel.addView(buttons)
+        val p=WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity=Gravity.TOP or Gravity.CENTER_HORIZONTAL; y=dp(70) }
+        calibrationButtons=panel
+        wm.addView(panel,p)
+    }
+
+    private fun stopCalibration(save:Boolean) {
+        val view=calibrationView
+        if(save && view!=null) {
+            UserPrefs.saveBoard(this,view.board,width,height)
+            UserPrefs.saveDiagnosis(this,"Calibrare salvată. Scanează din nou pentru soluție.",0,0)
+            setStatus("Calibrare salvată. Scanează din nou.")
+        }
+        calibrationButtons?.let { try { wm.removeViewImmediate(it) } catch(_:Exception) {} }
+        calibrationButtons=null
+        calibrationView?.let { try { wm.removeViewImmediate(it) } catch(_:Exception) {} }
+        calibrationView=null
+        if(!stopped) controls?.visibility=View.VISIBLE
+    }
+
     private fun clearMarks() {
         monitorJob?.let { handler.removeCallbacks(it) }
         monitorJob=null
@@ -335,6 +406,7 @@ class OverlayService: Service() {
         scanBusy=true
         val id=++scanGeneration
         clearMarks()
+        stopCalibration(false)
         setStatus("Scanez...")
         // Hide our own buttons while reading colors, including after dragging over the grid.
         controls?.visibility=View.INVISIBLE
