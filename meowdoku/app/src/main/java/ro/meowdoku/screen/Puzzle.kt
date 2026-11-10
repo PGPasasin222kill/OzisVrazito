@@ -5,12 +5,13 @@ import android.graphics.Color
 import kotlin.math.abs
 
 object Puzzle {
-    // Relative coordinates based on the supplied 945x2048 screenshot.
-    // They may need calibration on different screen layouts.
+    // Grid measured from the supplied 945 x 2048 screenshot: x=28..916, y=679..1567.
+    // The previous Y bounds sampled the palette above the grid rather than the board.
+    // These relative positions still need calibration if the game uses different layout/aspect ratio.
     private const val X0 = 0.026f
     private const val X1 = 0.974f
-    private const val Y0 = 0.292f
-    private const val Y1 = 0.683f
+    private const val Y0 = 0.3315f
+    private const val Y1 = 0.7681f
 
     data class Result(val columns: IntArray, val count: Int)
     fun bounds(w: Int, h: Int): FloatArray =
