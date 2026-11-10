@@ -11,6 +11,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.*
 import android.view.*
 import android.widget.*
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class OverlayService: Service() {
@@ -644,35 +645,5 @@ class OverlayService: Service() {
         reader?.close()
         projection?.stop()
         super.onDestroy()
-    }
-    private class MarksView(ctx:Context,val columns:IntArray,val board:Puzzle.Board,opacity:Int):View(ctx) {
-        private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color=Color.YELLOW
-            style=Paint.Style.FILL
-            textAlign=Paint.Align.CENTER
-            setShadowLayer(4f,1f,2f,Color.BLACK)
-        }
-        init { setOpacity(opacity) }
-        fun setOpacity(value:Int) {
-            paint.alpha=value.coerceIn(20,100)*255/100
-            invalidate()
-        }
-        override fun onDraw(canvas:Canvas) {
-            super.onDraw(canvas)
-            val b=board.asFloats()
-            val cw=(b[2]-b[0])/columns.size
-            val ch=(b[3]-b[1])/columns.size
-            // The captured bitmap is in absolute screen coordinates. WindowManager
-            // may position a full-screen overlay below the Samsung status bar.
-            // Convert absolute positions into coordinates local to this View.
-            val location=IntArray(2)
-            getLocationOnScreen(location)
-            paint.textSize=minOf(cw,ch)*0.66f
-            for(r in columns.indices) {
-                val cx=b[0]+(columns[r]+0.5f)*cw-location[0]
-                val cy=b[1]+(r+0.5f)*ch-location[1]
-                canvas.drawText("★",cx,cy-(paint.ascent()+paint.descent())/2f,paint)
-            }
-        }
     }
 }
