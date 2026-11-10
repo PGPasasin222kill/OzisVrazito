@@ -41,6 +41,14 @@ class MainActivity: Activity() {
             text="Pornește peste joc"
             setOnClickListener { begin() }
         })
+        panel.addView(Button(this).apply {
+            text="ASCUNDE STELUȚELE ACUM"
+            setOnClickListener { sendServiceCommand(OverlayService.ACTION_CLEAR) }
+        })
+        panel.addView(Button(this).apply {
+            text="OPREȘTE COMPLET SOLVERUL"
+            setOnClickListener { sendServiceCommand(OverlayService.ACTION_STOP) }
+        })
         panel.addView(title("SETĂRI",20f))
         panel.addView(title("Detectare automată: ACTIVĂ. Nu trebuie aleasă dimensiunea.",14f))
         panel.addView(Switch(this).apply {
@@ -112,6 +120,11 @@ class MainActivity: Activity() {
         panel.addView(title("Setările marcajelor se aplică la următoarea scanare. Mărimea butoanelor se aplică la următoarea pornire. ⚙ deschide ASCUNDE ★ și STOP.",13f))
         panel.addView(title("Permisiunile de captură, notificarea obligatorie a serviciului și avertizările Samsung sunt generate de Android și nu pot fi dezactivate prin aplicație.",12f))
         setContentView(ScrollView(this).apply { addView(panel) })
+    }
+
+    private fun sendServiceCommand(action:String) {
+        // Works even when the floating controls are invisible or inaccessible.
+        startService(Intent(this,OverlayService::class.java).setAction(action))
     }
 
     private fun begin() {
