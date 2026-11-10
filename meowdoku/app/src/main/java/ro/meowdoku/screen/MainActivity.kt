@@ -34,6 +34,7 @@ class MainActivity: Activity() {
             setPadding(0,dp(14),0,dp(5))
         }
         panel.addView(title("🐱 Meowdoku Screen Solver",23f).apply { gravity=Gravity.CENTER })
+        panel.addView(title("VERSIUNEA 0.3 • Setări complete",14f).apply { gravity=Gravity.CENTER })
         panel.addView(title("Scanare automată a oricărei grile detectabile. Butonul 🐱 este rotund și se poate trage.",14f).apply {
             gravity=Gravity.CENTER
         })
