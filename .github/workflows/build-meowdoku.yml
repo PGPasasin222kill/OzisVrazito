@@ -1,0 +1,46 @@
+name: Build Meowdoku Android APK
+
+on:
+  push:
+    paths:
+      - "meowdoku/**"
+      - ".github/workflows/build-meowdoku.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 35 SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Compile debug APK
+        working-directory: meowdoku
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Meowdoku-Screen-Solver-APK
+          path: meowdoku/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
