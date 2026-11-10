@@ -20,6 +20,7 @@ class OverlayService: Service() {
     private var reader:ImageReader?=null
     private var controls:View?=null
     private var overlay:MarksView?=null
+    private var statusText:TextView?=null
     private val handler=Handler(Looper.getMainLooper())
     private var width=0
     private var height=0
@@ -72,12 +73,13 @@ class OverlayService: Service() {
             setOnClickListener { scan() }
         }
         val info=TextView(this).apply {
-            text="Apasă pentru scanare"
+            text="Apasă pentru scanare automată"
             setTextColor(Color.WHITE)
             textSize=11f
         }
         container.addView(button)
         container.addView(info)
+        statusText=info
         container.addView(Button(this).apply {
             text="STOP"
             setOnClickListener { stopSelf() }
@@ -111,29 +113,36 @@ class OverlayService: Service() {
             padded.recycle()
             cropped
         } catch(e:Exception) { null } finally { img.close() }
-        if(bitmap==null) return
-        val result=Puzzle.detect(bitmap)
-        bitmap.recycle()
-        if(result==null) {
-            Toast.makeText(this,"Tabla nedetectată. Verifică formatul 10×10.",Toast.LENGTH_LONG).show()
+        if(bitmap==null) {
+            statusText?.text="Nu pot citi captura ecranului."
             return
         }
-        // Only show marks on a unique solution, avoiding misleading guesses.
-        if(result.count!=1) {
-            Toast.makeText(this,"Soluția nu este unică. Verifică culorile.",Toast.LENGTH_LONG).show()
-            return
-        }
-        val marks=MarksView(this,result.columns,width,height)
-        val params=WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply { gravity=Gravity.TOP or Gravity.START }
-        overlay=marks
-        wm.addView(marks,params)
-        Toast.makeText(this,"Pisicile sunt marcate cu stele!",Toast.LENGTH_SHORT).show()
+        statusText?.text="Scanez tabla..."
+        Thread {
+            val scan=try { Puzzle.detect(bitmap) }
+                catch(e:Exception) { Puzzle.Scan(null,"Eroare la scanare: "+e.javaClass.simpleName) }
+            bitmap.recycle()
+            handler.post {
+                val result=scan.result
+                if(result==null) {
+                    statusText?.text=scan.message
+                    Toast.makeText(this,scan.message,Toast.LENGTH_LONG).show()
+                    return@post
+                }
+                val marks=MarksView(this,result.columns,result.board)
+                val params=WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                ).apply { gravity=Gravity.TOP or Gravity.START }
+                overlay=marks
+                wm.addView(marks,params)
+                statusText?.text=scan.message+" — steluțele sunt afișate"
+                Toast.makeText(this,"Gata: "+result.size+"×"+result.size,Toast.LENGTH_SHORT).show()
+            }
+        }.start()
     }
     override fun onDestroy() {
         controls?.let { wm.removeView(it) }
@@ -143,7 +152,7 @@ class OverlayService: Service() {
         projection?.stop()
         super.onDestroy()
     }
-    private class MarksView(ctx:Context,val columns:IntArray,val w:Int,val h:Int):View(ctx) {
+    private class MarksView(ctx:Context,val columns:IntArray,val board:Puzzle.Board):View(ctx) {
         private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color=Color.YELLOW
             style=Paint.Style.FILL
@@ -152,7 +161,7 @@ class OverlayService: Service() {
         }
         override fun onDraw(canvas:Canvas) {
             super.onDraw(canvas)
-            val b=Puzzle.bounds(w,h)
+            val b=board.asFloats()
             val cw=(b[2]-b[0])/columns.size
             val ch=(b[3]-b[1])/columns.size
             paint.textSize=minOf(cw,ch)*0.66f
