@@ -36,4 +36,64 @@ object UserPrefs {
     fun overlayY(ctx: Context): Int = prefs(ctx).getInt("overlay_y",-1)
     fun saveOverlayPosition(ctx: Context, x: Int, y: Int) =
         prefs(ctx).edit().putInt("overlay_x",x).putInt("overlay_y",y).apply()
+
+    fun previewEnabled(ctx: Context) = prefs(ctx).getBoolean("preview_enabled",true)
+    fun setPreviewEnabled(ctx: Context, value:Boolean) =
+        prefs(ctx).edit().putBoolean("preview_enabled",value).apply()
+
+    fun autoHideLevelChange(ctx: Context) = prefs(ctx).getBoolean("auto_hide_on_level_change",true)
+    fun setAutoHideLevelChange(ctx: Context, value:Boolean) =
+        prefs(ctx).edit().putBoolean("auto_hide_on_level_change",value).apply()
+
+    /** 0=star, 1=dot, 2=ring, 3=cat */
+    fun markerShape(ctx: Context) = prefs(ctx).getInt("marker_shape",0).coerceIn(0,3)
+    fun setMarkerShape(ctx: Context, value:Int) =
+        prefs(ctx).edit().putInt("marker_shape",value.coerceIn(0,3)).apply()
+
+    /** Color in RGB, stored as an Android Color int. */
+    fun markerColor(ctx: Context) = prefs(ctx).getInt("marker_color",android.graphics.Color.YELLOW)
+    fun setMarkerColor(ctx: Context, value:Int) =
+        prefs(ctx).edit().putInt("marker_color",value).apply()
+
+    fun saveBoard(ctx: Context, board:Puzzle.Board, width:Int, height:Int) {
+        prefs(ctx).edit()
+            .putBoolean("manual_calibration",true)
+            .putFloat("manual_x0",board.left.toFloat()/width)
+            .putFloat("manual_y0",board.top.toFloat()/height)
+            .putFloat("manual_x1",board.right.toFloat()/width)
+            .putFloat("manual_y1",board.bottom.toFloat()/height)
+            .apply()
+    }
+    fun manualBoard(ctx: Context, width:Int, height:Int): Puzzle.Board? {
+        if(!prefs(ctx).getBoolean("manual_calibration",false))return null
+        val values=floatArrayOf(
+            prefs(ctx).getFloat("manual_x0",.03f),
+            prefs(ctx).getFloat("manual_y0",.33f),
+            prefs(ctx).getFloat("manual_x1",.97f),
+            prefs(ctx).getFloat("manual_y1",.77f)
+        )
+        val b=Puzzle.Board(
+            (values[0]*width).toInt().coerceIn(0,width-1),
+            (values[1]*height).toInt().coerceIn(0,height-1),
+            (values[2]*width).toInt().coerceIn(0,width-1),
+            (values[3]*height).toInt().coerceIn(0,height-1)
+        )
+        return if(b.right-b.left<100 || b.bottom-b.top<100) null else b
+    }
+    fun clearManualBoard(ctx: Context) =
+        prefs(ctx).edit().putBoolean("manual_calibration",false).apply()
+    fun hasManualBoard(ctx:Context)=prefs(ctx).getBoolean("manual_calibration",false)
+
+    fun saveDiagnosis(ctx:Context, message:String, grid:Int, colors:Int) =
+        prefs(ctx).edit()
+            .putString("last_diagnosis",message)
+            .putInt("last_grid",grid)
+            .putInt("last_colors",colors).apply()
+    fun diagnosis(ctx:Context):String {
+        val p=prefs(ctx)
+        val size=p.getInt("last_grid",0)
+        val colors=p.getInt("last_colors",0)
+        val message=p.getString("last_diagnosis","Nu ai scanat încă o tablă.") ?: ""
+        return (if(size>0) "Grilă: "+size+"×"+size+" | Culori: "+colors+"\\n" else "")+message
+    }
 }
