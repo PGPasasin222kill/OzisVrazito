@@ -69,6 +69,7 @@ class OverlayService: Service() {
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
         // System UI / app emergency commands work without asking for screen share again.
         if (intent?.action==ACTION_STOP) {
+            cancelAutoContinue()
             scanGeneration++
             scanBusy=false
             AutoTapService.cancel()
@@ -79,6 +80,7 @@ class OverlayService: Service() {
             return START_NOT_STICKY
         }
         if (intent?.action==ACTION_CLEAR) {
+            cancelAutoContinue()
             scanGeneration++
             scanBusy=false
             AutoTapService.cancel()
@@ -219,6 +221,7 @@ class OverlayService: Service() {
                 setOnClickListener { onClick() }
             }
         menu.addView(menuButton("ASCUNDE ★") {
+            cancelAutoContinue()
             scanGeneration++
             scanBusy=false
             AutoTapService.cancel()
@@ -246,6 +249,11 @@ class OverlayService: Service() {
         val autoButton=menuButton(if(UserPrefs.autoSolver(this)) "AUTO: ON" else "AUTO: OFF") {}
         autoButton.setOnClickListener {
             val next=!UserPrefs.autoSolver(this)
+            if(!next) {
+                cancelAutoContinue()
+                AutoTapService.cancel()
+                controls?.visibility=View.VISIBLE
+            }
             UserPrefs.setAutoSolver(this,next)
             autoButton.text=if(next) "AUTO: ON" else "AUTO: OFF"
             if(next && !AutoTapService.isReady()) {
@@ -286,6 +294,7 @@ class OverlayService: Service() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
         })
         menu.addView(menuButton("STOP") {
+            cancelAutoContinue()
             scanGeneration++
             scanBusy=false
             AutoTapService.cancel()
@@ -356,6 +365,7 @@ class OverlayService: Service() {
     }
     private fun beginCalibration() {
         if(stopped || projection==null) return
+        cancelAutoContinue()
         AutoTapService.cancel()
         scanGeneration++
         scanBusy=false
@@ -436,6 +446,7 @@ class OverlayService: Service() {
     }
     private fun scan() {
         if (stopped || scanBusy) return
+        cancelAutoContinue()
         AutoTapService.cancel()
         scanBusy=true
         val id=++scanGeneration
@@ -773,6 +784,7 @@ class OverlayService: Service() {
 
     private fun useSolution(id:Int,result:Puzzle.Result,fp:IntArray?,alreadyPlaced:BooleanArray) {
         if(stopped || id!=scanGeneration)return
+        cancelAutoContinue()
         if(!UserPrefs.autoSolver(this)) {
             displayResult(id,result,fp)
             return
@@ -790,7 +802,9 @@ class OverlayService: Service() {
             controls?.visibility=View.VISIBLE
             setStatus(message)
             UserPrefs.saveDiagnosis(this,message,result.size,result.size)
-            if(!success) {
+            if(success) {
+                startAutoContinue(id,result,fp)
+            } else {
                 // Partial auto placement may need inspection; show remaining suggestion.
                 displayResult(id,result,fp)
                 Toast.makeText(this,"AUTO întrerupt. Verifică tabla.",Toast.LENGTH_LONG).show()
@@ -854,6 +868,7 @@ class OverlayService: Service() {
     }
     override fun onDestroy() {
         stopped=true
+        cancelAutoContinue()
         AutoTapService.cancel()
         stopCalibration(false)
         scanGeneration++
