@@ -12,6 +12,8 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.ImageView
+import android.widget.Toast
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -22,6 +24,7 @@ import android.widget.TextView
 class MainActivity: Activity() {
     private val requestScreenCapture=10
     private var diagnosticsView:TextView?=null
+    private var autoServiceView:TextView?=null
     private fun dp(value:Int)=(value*resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState:Bundle?) {
@@ -35,8 +38,16 @@ class MainActivity: Activity() {
             textSize=size
             setPadding(0,dp(14),0,dp(5))
         }
-        panel.addView(title("🐱 Meowdoku Screen Solver",23f).apply { gravity=Gravity.CENTER })
-        panel.addView(title("VERSIUNEA 1.0.1 • Setări complete",14f).apply { gravity=Gravity.CENTER })
+        panel.addView(ImageView(this).apply {
+            setImageResource(R.drawable.catpilot_logo)
+            contentDescription="CatPilot — pisică violet cu coroană"
+            layoutParams=LinearLayout.LayoutParams(dp(100),dp(100)).apply {
+                gravity=Gravity.CENTER_HORIZONTAL
+                bottomMargin=dp(4)
+            }
+        })
+        panel.addView(title("🐱 CatPilot",26f).apply { gravity=Gravity.CENTER })
+        panel.addView(title("VERSIUNEA 1.1.0 • Setări complete",14f).apply { gravity=Gravity.CENTER })
         panel.addView(title("Scanare automată a oricărei grile detectabile. Butonul 🐱 este rotund și se poate trage.",14f).apply {
             gravity=Gravity.CENTER
         })
@@ -52,6 +63,35 @@ class MainActivity: Activity() {
             text="OPREȘTE COMPLET SOLVERUL"
             setOnClickListener { sendServiceCommand(OverlayService.ACTION_STOP) }
         })
+        panel.addView(title("AUTO SOLVER",20f))
+        panel.addView(Switch(this).apply {
+            text="AUTO: apasă singur pisicile după scanarea MEOW"
+            textSize=16f
+            isChecked=UserPrefs.autoSolver(this@MainActivity)
+            setOnCheckedChangeListener { _,enabled ->
+                UserPrefs.setAutoSolver(this@MainActivity,enabled)
+                if(enabled && !AutoTapService.isReady()) {
+                    Toast.makeText(this@MainActivity,
+                        "Activează CatPilot în Setări → Accesibilitate → Aplicații instalate.",
+                        Toast.LENGTH_LONG).show()
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+                autoServiceView?.text=autoStatus()
+            }
+        })
+        autoServiceView=title(autoStatus(),14f)
+        panel.addView(autoServiceView)
+        panel.addView(Button(this).apply {
+            text="ACTIVARE SERVICIU DE ACCESIBILITATE"
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+        })
+        panel.addView(title(
+            "AUTO este opțional și inițial oprit. Necesită activarea manuală a accesibilității Android. " +
+            "Pe tabla goală funcționează cel mai sigur. Dacă există deja pisici, verifică rezultatul: " +
+            "recunoașterea pieselor existente este experimentală. Comenzile STOP și ASCUNDE anulează secvența de apăsări.",
+            13f))
         panel.addView(title("SETĂRI",20f))
         panel.addView(title("Detectare automată: ACTIVĂ. Nu trebuie aleasă dimensiunea.",14f))
         panel.addView(Button(this).apply {
@@ -175,14 +215,22 @@ class MainActivity: Activity() {
             setOnClickListener { diagnosticsView?.text=UserPrefs.diagnosis(this@MainActivity) }
         })
         panel.addView(title("Notificare: SCANEAZĂ / ASCUNDE / OPREȘTE — funcționează când captura este activă.",14f))
-        panel.addView(title("Plan viitor: auto-solver opțional cu acord explicit. Versiunea 1.0 nu apasă automat.",13f))
+        panel.addView(title("Mod MANUAL: numai marcaje. Mod AUTO: gesturi la cererea ta, după verificarea soluției.",13f))
         panel.addView(title("Permisiunile de captură, notificarea obligatorie a serviciului și avertizările Samsung sunt generate de Android și nu pot fi dezactivate prin aplicație.",12f))
         setContentView(ScrollView(this).apply { addView(panel) })
+    }
+
+    private fun autoStatus():String = when {
+        AutoTapService.isReady() && UserPrefs.autoSolver(this) ->
+            "AUTO gata: serviciul Android este activ."
+        AutoTapService.isReady() -> "Serviciul Android este activ; AUTO oprit."
+        else -> "Serviciul de accesibilitate nu este activ. AUTO nu poate apăsa."
     }
 
     override fun onResume() {
         super.onResume()
         diagnosticsView?.text=UserPrefs.diagnosis(this)
+        autoServiceView?.text=autoStatus()
     }
 
     private fun sendServiceCommand(action:String) {
