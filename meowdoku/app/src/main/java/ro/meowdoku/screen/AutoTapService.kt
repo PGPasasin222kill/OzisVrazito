@@ -18,9 +18,9 @@ class AutoTapService : AccessibilityService() {
         fun isReady():Boolean=current!=null
         fun cancel() { current?.cancelSequence() }
 
-        fun run(result:Puzzle.Result,onResult:(Boolean,String)->Unit):Boolean {
+        fun run(result:Puzzle.Result,alreadyPlaced:BooleanArray,onResult:(Boolean,String)->Unit):Boolean {
             val service=current ?: return false
-            return service.startSequence(result,onResult)
+            return service.startSequence(result,alreadyPlaced,onResult)
         }
     }
 
@@ -48,7 +48,7 @@ class AutoTapService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun startSequence(result:Puzzle.Result,onResult:(Boolean,String)->Unit):Boolean {
+    private fun startSequence(result:Puzzle.Result,alreadyPlaced:BooleanArray,onResult:(Boolean,String)->Unit):Boolean {
         if(busy || result.size !in 3..24 || result.columns.any { it !in 0 until result.size })
             return false
         val target=rootInActiveWindow?.packageName?.toString()
@@ -61,6 +61,7 @@ class AutoTapService : AccessibilityService() {
         busy=true
         val token=++generation
         var index=0
+        var tapped=0
         fun finish(ok:Boolean,message:String) {
             if(token!=generation)return
             busy=false
@@ -69,7 +70,12 @@ class AutoTapService : AccessibilityService() {
         fun next() {
             if(token!=generation)return
             if(index>=count) {
-                finish(true,"AUTO: am apăsat "+count+" căsuțe.")
+                finish(true,"AUTO: apăsate "+tapped+" căsuțe; "+(count-tapped)+" deja ocupate.")
+                return
+            }
+            if(index<alreadyPlaced.size && alreadyPlaced[index]) {
+                index++
+                handler.postDelayed({ next() },60L)
                 return
             }
             val col=result.columns[index]
@@ -85,6 +91,7 @@ class AutoTapService : AccessibilityService() {
                     override fun onCompleted(gestureDescription:GestureDescription?) {
                         if(token!=generation)return
                         index++
+                        tapped++
                         handler.postDelayed({ next() },190L)
                     }
                     override fun onCancelled(gestureDescription:GestureDescription?) {
