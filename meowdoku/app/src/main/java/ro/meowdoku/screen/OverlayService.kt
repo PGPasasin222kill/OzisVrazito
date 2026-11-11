@@ -43,6 +43,22 @@ class OverlayService: Service() {
     private var height=0
     private var density=0
 
+    // Continuous AUTO only runs after a user-initiated MEOW has just solved a board.
+    private enum class AutoPhase { IDLE, WAITING_RESULT, DISMISSING_RESULT, WAITING_BOARD, CHECKING_BOARD }
+    private var autoPhase=AutoPhase.IDLE
+    private var autoLoopEpoch=0
+    private var autoLoopTask:Runnable?=null
+    private var autoLoopLastKind=CompletionScreens.Kind.UNKNOWN
+    private var autoLoopStableFrames=0
+    private var autoLoopSawPopup=false
+    private var autoLoopDismissCount=0
+    private var autoLoopBoardRetries=0
+    private var autoLoopDeadline=0L
+    private var autoLoopLastDismiss=0L
+    private var autoLoopBusy=false
+    private var autoLoopBaseline:IntArray?=null
+    private var autoLoopBaselineSize=0
+
     override fun onBind(intent:Intent?):IBinder?=null
     override fun onCreate() {
         super.onCreate()
@@ -577,6 +593,182 @@ class OverlayService: Service() {
             }
             dark>=total/7 && light>=total/35
         }
+    }
+
+    private fun cancelAutoContinue() {
+        autoLoopEpoch++
+        autoLoopTask?.let { handler.removeCallbacks(it) }
+        autoLoopTask=null
+        autoLoopBusy=false
+        autoLoopSawPopup=false
+        autoLoopLastKind=CompletionScreens.Kind.UNKNOWN
+        autoLoopStableFrames=0
+        autoPhase=AutoPhase.IDLE
+    }
+
+    private fun stopAutoContinue(reason:String) {
+        cancelAutoContinue()
+        controls?.visibility=View.VISIBLE
+        setStatus(reason)
+        UserPrefs.saveDiagnosis(this,reason,0,0)
+        appToast(reason,true)
+    }
+
+    private fun scheduleAutoContinue(id:Int,epoch:Int,waitMs:Long) {
+        if(stopped || id!=scanGeneration || epoch!=autoLoopEpoch) return
+        autoLoopTask?.let { handler.removeCallbacks(it) }
+        val task=Runnable { pollAutoContinue(id,epoch) }
+        autoLoopTask=task
+        handler.postDelayed(task,waitMs.coerceAtLeast(250L))
+    }
+
+    private fun startAutoContinue(id:Int,previous:Puzzle.Result,fingerprint:IntArray?) {
+        cancelAutoContinue()
+        if(!UserPrefs.autoSolver(this) || !UserPrefs.autoContinue(this) ||
+            !AutoTapService.isReady() || stopped || id!=scanGeneration)return
+        autoPhase=AutoPhase.WAITING_RESULT
+        autoLoopDismissCount=0
+        autoLoopBoardRetries=0
+        autoLoopSawPopup=false
+        autoLoopBaseline=fingerprint
+        autoLoopBaselineSize=previous.size
+        autoLoopDeadline=SystemClock.elapsedRealtime()+60000L
+        setStatus("AUTO: aștept ecranul de final.")
+        scheduleAutoContinue(id,autoLoopEpoch,1150L)
+    }
+
+    private fun pollAutoContinue(id:Int,epoch:Int) {
+        if(stopped || id!=scanGeneration || epoch!=autoLoopEpoch)return
+        if(!UserPrefs.autoContinue(this) || !UserPrefs.autoSolver(this) ||
+           !AutoTapService.isReady()) {
+            stopAutoContinue("AUTO-continuare a fost oprită.")
+            return
+        }
+        if(SystemClock.elapsedRealtime()>autoLoopDeadline) {
+            stopAutoContinue("AUTO s-a oprit: următorul nivel nu a apărut.")
+            return
+        }
+        if(autoLoopBusy)return
+        val image=reader?.acquireLatestImage()
+        if(image==null) {
+            scheduleAutoContinue(id,epoch,550L)
+            return
+        }
+        val bmp=try { imageBitmap(image) } finally { image.close() }
+        if(bmp==null) {
+            scheduleAutoContinue(id,epoch,700L)
+            return
+        }
+        val kind=try { CompletionScreens.classify(bmp) }
+            catch(_:Exception) { CompletionScreens.Kind.UNKNOWN }
+        if(kind!=CompletionScreens.Kind.UNKNOWN) {
+            bmp.recycle()
+            if(kind==autoLoopLastKind) autoLoopStableFrames++
+            else {
+                autoLoopLastKind=kind
+                autoLoopStableFrames=1
+            }
+            // Even with Safe Mode off, never tap a screen classified UNKNOWN.
+            val framesNeeded=if(UserPrefs.safeAuto(this))2 else 1
+            if(autoLoopStableFrames<framesNeeded) {
+                scheduleAutoContinue(id,epoch,560L)
+                return
+            }
+            autoLoopSawPopup=true
+            if(autoLoopDismissCount>=UserPrefs.autoRetryLimit(this)) {
+                stopAutoContinue("AUTO oprit: prea multe ecrane de final consecutive.")
+                return
+            }
+            val target=CompletionScreens.tapPoint(kind)
+            if(target==null) {
+                stopAutoContinue("AUTO nu recunoaște butonul de continuare.")
+                return
+            }
+            autoPhase=AutoPhase.DISMISSING_RESULT
+            autoLoopBusy=true
+            val sent=AutoTapService.tapFraction(target.first,target.second) { ok ->
+                if(stopped || id!=scanGeneration || epoch!=autoLoopEpoch)return@tapFraction
+                autoLoopBusy=false
+                if(!ok) {
+                    stopAutoContinue("AUTO: Android a refuzat atingerea de continuare.")
+                } else {
+                    autoLoopDismissCount++
+                    autoLoopLastDismiss=SystemClock.elapsedRealtime()
+                    autoLoopLastKind=CompletionScreens.Kind.UNKNOWN
+                    autoLoopStableFrames=0
+                    autoPhase=AutoPhase.WAITING_BOARD
+                    setStatus("AUTO: am închis "+if(kind==CompletionScreens.Kind.LEADERBOARD)
+                        "Leaderboard." else "Flawless.")
+                    scheduleAutoContinue(id,epoch,UserPrefs.continueDelayMs(this).toLong())
+                }
+            }
+            if(!sent) {
+                autoLoopBusy=false
+                stopAutoContinue("AUTO: atingerea nu a putut fi trimisă.")
+            }
+            return
+        }
+        // No blind fallback: we only look for the next board after an identified
+        // Leaderboard/Flawless screen has been dismissed successfully.
+        autoLoopLastKind=CompletionScreens.Kind.UNKNOWN
+        autoLoopStableFrames=0
+        if(!autoLoopSawPopup) {
+            bmp.recycle()
+            scheduleAutoContinue(id,epoch,700L)
+            return
+        }
+        val sinceDismiss=SystemClock.elapsedRealtime()-autoLoopLastDismiss
+        if(sinceDismiss<UserPrefs.continueDelayMs(this)) {
+            bmp.recycle()
+            scheduleAutoContinue(id,epoch,500L)
+            return
+        }
+        if(autoLoopBoardRetries>=UserPrefs.autoRetryLimit(this)) {
+            bmp.recycle()
+            stopAutoContinue("AUTO s-a oprit: nu poate recunoaște tabla nouă.")
+            return
+        }
+        autoPhase=AutoPhase.CHECKING_BOARD
+        autoLoopBusy=true
+        Thread {
+            val scan=try {
+                Puzzle.detect(bmp,true,UserPrefs.manualBoard(this,width,height))
+            } catch(_:Exception) { Puzzle.Scan(null,"Eroare la recunoașterea nivelului nou.") }
+            val fp=try { scan.result?.let { boardFingerprint(bmp,it.board,it.size) } }
+                catch(_:Exception) { null }
+            val placed=try { scan.result?.let { placedCatRows(bmp,it) } ?: BooleanArray(0) }
+                catch(_:Exception) { BooleanArray(0) }
+            bmp.recycle()
+            handler.post {
+                if(stopped || id!=scanGeneration || epoch!=autoLoopEpoch)return@post
+                autoLoopBusy=false
+                if(scan.result!=null) {
+                    val old=autoLoopBaseline
+                    val fresh=fp
+                    val sameLayout=old!=null && fresh!=null &&
+                        autoLoopBaselineSize==scan.result.size && old.size==fresh.size
+                    val changed=if(sameLayout && old!=null && fresh!=null)
+                        old.indices.count { i ->
+                            val a=old[i]; val b=fresh[i]
+                            val diff=abs((a shr 8)-(b shr 8))+
+                                abs(((a shr 4) and 15)-((b shr 4) and 15))+
+                                abs((a and 15)-(b and 15))
+                            diff>=4
+                        } else Int.MAX_VALUE
+                    if(!sameLayout || changed>=maxOf(3,scan.result.size*scan.result.size/10)) {
+                        cancelAutoContinue()
+                        val nextId=++scanGeneration
+                        UserPrefs.saveDiagnosis(this,"AUTO: nivel nou "+scan.result.size+"×"+scan.result.size,
+                            scan.gridSize,scan.colors)
+                        useSolution(nextId,scan.result,fp,placed)
+                        return@post
+                    }
+                }
+                autoLoopBoardRetries++
+                autoPhase=AutoPhase.WAITING_BOARD
+                scheduleAutoContinue(id,epoch,1000L)
+            }
+        }.start()
     }
 
     private fun useSolution(id:Int,result:Puzzle.Result,fp:IntArray?,alreadyPlaced:BooleanArray) {
