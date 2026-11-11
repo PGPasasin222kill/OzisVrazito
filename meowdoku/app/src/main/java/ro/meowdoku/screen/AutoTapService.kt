@@ -22,6 +22,12 @@ class AutoTapService : AccessibilityService() {
             val service=current ?: return false
             return service.startSequence(result,alreadyPlaced,onResult)
         }
+
+        /** One navigation tap, only after an identified result screen is confirmed. */
+        fun tapFraction(fx:Float,fy:Float,onResult:(Boolean)->Unit):Boolean {
+            val service=current ?: return false
+            return service.startNavigationTap(fx,fy,onResult)
+        }
     }
 
     private val handler=Handler(Looper.getMainLooper())
@@ -46,6 +52,41 @@ class AutoTapService : AccessibilityService() {
         cancelSequence()
         if(current===this) current=null
         super.onDestroy()
+    }
+
+    private fun startNavigationTap(fx:Float,fy:Float,onResult:(Boolean)->Unit):Boolean {
+        if(busy || fx !in .12f.. .88f || fy !in .55f.. .95f) return false
+        val activePackage=rootInActiveWindow?.packageName?.toString()
+        if(activePackage==packageName)return false
+        val metrics=android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        val display=(getSystemService(WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay
+        @Suppress("DEPRECATION")
+        display.getRealMetrics(metrics)
+        val x=metrics.widthPixels*fx
+        val y=metrics.heightPixels*fy
+        val gesture=GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(Path().apply {moveTo(x,y)},0,85))
+            .build()
+        busy=true
+        val token=++generation
+        val accepted=dispatchGesture(gesture,object:GestureResultCallback() {
+            override fun onCompleted(gestureDescription:GestureDescription?) {
+                if(token!=generation)return
+                busy=false
+                onResult(true)
+            }
+            override fun onCancelled(gestureDescription:GestureDescription?) {
+                if(token!=generation)return
+                busy=false
+                onResult(false)
+            }
+        },handler)
+        if(!accepted) {
+            busy=false
+            return false
+        }
+        return true
     }
 
     private fun startSequence(result:Puzzle.Result,alreadyPlaced:BooleanArray,onResult:(Boolean,String)->Unit):Boolean {
