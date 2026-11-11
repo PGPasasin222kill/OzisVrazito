@@ -16,17 +16,11 @@ class MarkerView(
     val board:Puzzle.Board,
     opacity:Int,
     private val shape:Int,
-    private val markerColor:Int,
-    var preview:Boolean
+    private val markerColor:Int
 ):View(context) {
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign=Paint.Align.CENTER
         setShadowLayer(2f,1f,1f,Color.BLACK)
-    }
-    private val guide=Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style=Paint.Style.STROKE
-        strokeWidth=2f*resources.displayMetrics.density
-        color=Color.argb(195,0,230,210)
     }
     private val location=IntArray(2)
 
@@ -36,8 +30,6 @@ class MarkerView(
             Color.red(markerColor),Color.green(markerColor),Color.blue(markerColor))
         invalidate()
     }
-    fun confirm() { preview=false; invalidate() }
-
     override fun onDraw(canvas:Canvas) {
         super.onDraw(canvas)
         getLocationOnScreen(location)
@@ -48,16 +40,6 @@ class MarkerView(
         val cw=(board.right-board.left+1f)/count
         val ch=(board.bottom-board.top+1f)/count
         val cell=minOf(cw,ch)
-        if(preview) {
-            canvas.drawRect(left.toFloat(),top.toFloat(),
-                (board.right-location[0]).toFloat(),(board.bottom-location[1]).toFloat(),guide)
-            for(i in 1 until count) {
-                val dx=left+i*cw
-                val dy=top+i*ch
-                canvas.drawLine(dx,top.toFloat(),dx,top+count*ch,guide)
-                canvas.drawLine(left.toFloat(),dy,left+count*cw,dy,guide)
-            }
-        }
         for(row in columns.indices) {
             val x=left+(columns[row]+.5f)*cw
             val y=top+(row+.5f)*ch
