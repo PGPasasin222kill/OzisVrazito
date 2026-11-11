@@ -9,8 +9,8 @@ android {
         applicationId = "ro.meowdoku.screen"
         minSdk = 29
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.0.1"
+        versionCode = 12
+        versionName = "1.1.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
