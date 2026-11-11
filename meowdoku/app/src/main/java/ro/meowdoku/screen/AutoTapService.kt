@@ -122,24 +122,45 @@ class AutoTapService : AccessibilityService() {
             val col=result.columns[index]
             val x=board.left+(col+.5f)*cw
             val y=board.top+(index+.5f)*ch
-            // Coordinates are in physical display pixels, as captured by MediaProjection.
-            val path=Path().apply { moveTo(x,y) }
-            val gesture=GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(path,0,85))
-                .build()
-            val dispatched=dispatchGesture(gesture,
-                object:GestureResultCallback() {
+            // Meowdoku places a cat on a DOUBLE TAP, not a single tap.
+            // Dispatch two short physical-screen gestures to the same center,
+            // then wait before moving to the next row.
+            fun tapOnce(done:(Boolean)->Unit):Boolean {
+                val gesture=GestureDescription.Builder()
+                    .addStroke(GestureDescription.StrokeDescription(
+                        Path().apply { moveTo(x,y) },0,55L))
+                    .build()
+                return dispatchGesture(gesture,object:GestureResultCallback() {
                     override fun onCompleted(gestureDescription:GestureDescription?) {
-                        if(token!=generation)return
-                        index++
-                        tapped++
-                        handler.postDelayed({ next() },190L)
+                        if(token==generation) done(true)
                     }
                     override fun onCancelled(gestureDescription:GestureDescription?) {
-                        finish(false,"AUTO întrerupt după "+index+" căsuțe.")
+                        if(token==generation) done(false)
                     }
                 },handler)
-            if(!dispatched) finish(false,"Android nu a acceptat atingerea AUTO.")
+            }
+            val first= tapOnce { firstOk ->
+                if(!firstOk) {
+                    finish(false,"AUTO: prima atingere a fost întreruptă.")
+                } else {
+                    // 55 ms contact + 90 ms gap = a reliable double-tap interval.
+                    handler.postDelayed({
+                        if(token==generation) {
+                            val second=tapOnce { secondOk ->
+                                if(!secondOk) {
+                                    finish(false,"AUTO: a doua atingere a fost întreruptă.")
+                                } else {
+                                    index++
+                                    tapped++
+                                    handler.postDelayed({ next() },260L)
+                                }
+                            }
+                            if(!second) finish(false,"Android a refuzat a doua atingere AUTO.")
+                        }
+                    },90L)
+                }
+            }
+            if(!first) finish(false,"Android a refuzat prima atingere AUTO.")
         }
         // Give the application overlay time to become invisible.
         handler.postDelayed({ next() },420L)
