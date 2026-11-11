@@ -37,10 +37,6 @@ object UserPrefs {
     fun saveOverlayPosition(ctx: Context, x: Int, y: Int) =
         prefs(ctx).edit().putInt("overlay_x",x).putInt("overlay_y",y).apply()
 
-    fun previewEnabled(ctx: Context) = prefs(ctx).getBoolean("preview_enabled",true)
-    fun setPreviewEnabled(ctx: Context, value:Boolean) =
-        prefs(ctx).edit().putBoolean("preview_enabled",value).apply()
-
     fun autoHideLevelChange(ctx: Context) = prefs(ctx).getBoolean("auto_hide_on_level_change",true)
     fun setAutoHideLevelChange(ctx: Context, value:Boolean) =
         prefs(ctx).edit().putBoolean("auto_hide_on_level_change",value).apply()
