@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CatPilot</string>
+    <string name="auto_tap_description">CatPilot poate apăsa căsuțele jocului doar când activezi AUTO și pornești scanarea MEOW. Dezactivează serviciul oricând din Accesibilitate.</string>
+</resources>
