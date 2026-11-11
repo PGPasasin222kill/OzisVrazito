@@ -47,7 +47,7 @@ class OverlayService: Service() {
     override fun onCreate() {
         super.onCreate()
         wm=getSystemService(WINDOW_SERVICE) as WindowManager
-        val channel=NotificationChannel("capture","Meowdoku scanare ecran",NotificationManager.IMPORTANCE_LOW)
+        val channel=NotificationChannel("capture","CatPilot — captură ecran",NotificationManager.IMPORTANCE_LOW)
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
     }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
@@ -55,6 +55,7 @@ class OverlayService: Service() {
         if (intent?.action==ACTION_STOP) {
             scanGeneration++
             scanBusy=false
+            AutoTapService.cancel()
             clearMarks()
             stopCalibration(false)
             controls?.visibility=View.VISIBLE
@@ -64,6 +65,7 @@ class OverlayService: Service() {
         if (intent?.action==ACTION_CLEAR) {
             scanGeneration++
             scanBusy=false
+            AutoTapService.cancel()
             clearMarks()
             stopCalibration(false)
             controls?.visibility=View.VISIBLE
@@ -85,7 +87,7 @@ class OverlayService: Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notice=Notification.Builder(this,"capture")
             .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentTitle("Meowdoku Screen Solver v1.0")
+            .setContentTitle("CatPilot v1.1 • AUTO opțional")
             .setContentText("Captura activă • SCAN / ASCUNDE / OPREȘTE")
             .addAction(Notification.Action.Builder(
                 android.R.drawable.ic_menu_search,"SCANEAZĂ",pending(ACTION_SCAN,101)).build())
@@ -203,6 +205,7 @@ class OverlayService: Service() {
         menu.addView(menuButton("ASCUNDE ★") {
             scanGeneration++
             scanBusy=false
+            AutoTapService.cancel()
             clearMarks()
             setStatus("Marcajele au fost ascunse")
             menu.visibility=View.GONE
@@ -222,7 +225,21 @@ class OverlayService: Service() {
             messageButton.text=if(enabled) "Mesaje: ON" else "Mesaje: OFF"
             if(enabled) info.text="Mesajele sunt pornite"
         }
+
         menu.addView(messageButton)
+        val autoButton=menuButton(if(UserPrefs.autoSolver(this)) "AUTO: ON" else "AUTO: OFF") {}
+        autoButton.setOnClickListener {
+            val next=!UserPrefs.autoSolver(this)
+            UserPrefs.setAutoSolver(this,next)
+            autoButton.text=if(next) "AUTO: ON" else "AUTO: OFF"
+            if(next && !AutoTapService.isReady()) {
+                menu.visibility=View.GONE
+                startActivity(Intent(this,MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                Toast.makeText(this,"Activează CatPilot în Accesibilitate ca să funcționeze AUTO.",Toast.LENGTH_LONG).show()
+            }
+        }
+        menu.addView(autoButton)
         val sizeLabel=menuButton("Mărime: ${UserPrefs.sizeDp(this)} dp") {}
         fun updateSize(change:Int) {
             val newSize=(UserPrefs.sizeDp(this)+change).coerceIn(24,64)
@@ -255,6 +272,7 @@ class OverlayService: Service() {
         menu.addView(menuButton("STOP") {
             scanGeneration++
             scanBusy=false
+            AutoTapService.cancel()
             clearMarks()
             stopSelf()
         })
@@ -322,6 +340,7 @@ class OverlayService: Service() {
     }
     private fun beginCalibration() {
         if(stopped || projection==null) return
+        AutoTapService.cancel()
         scanGeneration++
         scanBusy=false
         clearMarks()
@@ -401,6 +420,7 @@ class OverlayService: Service() {
     }
     private fun scan() {
         if (stopped || scanBusy) return
+        AutoTapService.cancel()
         scanBusy=true
         val id=++scanGeneration
         clearMarks()
@@ -527,6 +547,70 @@ class OverlayService: Service() {
         activateMarkers(id,result)
     }
 
+    /**
+     * AUTO is user opt-in and only uses the unique verified result. Existing cats
+     * are recognized conservatively by their dark icon and lighter eye details.
+     * When recognition is uncertain the user can use the manual mode instead.
+     */
+    private fun placedCatRows(bmp:Bitmap, result:Puzzle.Result):BooleanArray {
+        val n=result.size
+        val board=result.board
+        val cw=(board.right-board.left+1f)/n
+        val ch=(board.bottom-board.top+1f)/n
+        return BooleanArray(n) { r ->
+            val col=result.columns[r]
+            var dark=0
+            var light=0
+            var total=0
+            for(iy in 0..10) for(ix in 0..10) {
+                val fx=.25f+ix*.05f
+                val fy=.25f+iy*.05f
+                val x=(board.left+(col+fx)*cw).toInt().coerceIn(0,bmp.width-1)
+                val y=(board.top+(r+fy)*ch).toInt().coerceIn(0,bmp.height-1)
+                val p=bmp.getPixel(x,y)
+                val red=Color.red(p)
+                val green=Color.green(p)
+                val blue=Color.blue(p)
+                if(red<78 && green<78 && blue<78) dark++
+                if(red>198 && green>198 && blue>198) light++
+                total++
+            }
+            dark>=total/7 && light>=total/35
+        }
+    }
+
+    private fun useSolution(id:Int,result:Puzzle.Result,fp:IntArray?,alreadyPlaced:BooleanArray) {
+        if(stopped || id!=scanGeneration)return
+        if(!UserPrefs.autoSolver(this)) {
+            displayResult(id,result,fp)
+            return
+        }
+        if(!AutoTapService.isReady()) {
+            setStatus("AUTO necesită serviciul CatPilot din Accesibilitate.")
+            Toast.makeText(this,"Activează CatPilot în Setări → Accesibilitate. Arăt marcajele manual.",Toast.LENGTH_LONG).show()
+            displayResult(id,result,fp)
+            return
+        }
+        clearMarks()
+        controls?.visibility=View.INVISIBLE
+        val accepted=AutoTapService.run(result,alreadyPlaced) { success,message ->
+            if(stopped || id!=scanGeneration)return@run
+            controls?.visibility=View.VISIBLE
+            setStatus(message)
+            UserPrefs.saveDiagnosis(this,message,result.size,result.size)
+            if(!success) {
+                // Partial auto placement may need inspection; show remaining suggestion.
+                displayResult(id,result,fp)
+                Toast.makeText(this,"AUTO întrerupt. Verifică tabla.",Toast.LENGTH_LONG).show()
+            }
+        }
+        if(!accepted) {
+            controls?.visibility=View.VISIBLE
+            setStatus("AUTO nu poate porni. Afișez soluția manual.")
+            displayResult(id,result,fp)
+        }
+    }
+
     private fun capture(attempt:Int=0,id:Int) {
         if(stopped || id!=scanGeneration)return
         val img=reader?.acquireLatestImage()
@@ -551,7 +635,7 @@ class OverlayService: Service() {
         setStatus("Scanez tabla...")
         Thread {
             val scan=try {
-                Puzzle.detect(bitmap,UserPrefs.verifyResult(this),
+                Puzzle.detect(bitmap,UserPrefs.verifyResult(this) || UserPrefs.autoSolver(this),
                     UserPrefs.manualBoard(this,width,height))
             } catch(e:Exception) {
                 Puzzle.Scan(null,"Eroare scanare: "+e.javaClass.simpleName)
@@ -559,6 +643,9 @@ class OverlayService: Service() {
             val fp=try {
                 scan.result?.let { boardFingerprint(bitmap,it.board,it.size) }
             } catch(_:Exception) { null }
+            val alreadyPlaced=try {
+                scan.result?.let { placedCatRows(bitmap,it) } ?: BooleanArray(0)
+            } catch(_:Exception) { BooleanArray(0) }
             bitmap.recycle()
             handler.post {
                 if(stopped || id!=scanGeneration)return@post
@@ -568,13 +655,14 @@ class OverlayService: Service() {
                     setStatus(scan.message)
                     appToast(scan.message,true)
                 } else {
-                    displayResult(id,scan.result,fp)
+                    useSolution(id,scan.result,fp,alreadyPlaced)
                 }
             }
         }.start()
     }
     override fun onDestroy() {
         stopped=true
+        AutoTapService.cancel()
         stopCalibration(false)
         scanGeneration++
         scanBusy=false
