@@ -36,7 +36,7 @@ class MainActivity: Activity() {
             setPadding(0,dp(14),0,dp(5))
         }
         panel.addView(title("🐱 Meowdoku Screen Solver",23f).apply { gravity=Gravity.CENTER })
-        panel.addView(title("VERSIUNEA 1.0 • Setări complete",14f).apply { gravity=Gravity.CENTER })
+        panel.addView(title("VERSIUNEA 1.0.1 • Setări complete",14f).apply { gravity=Gravity.CENTER })
         panel.addView(title("Scanare automată a oricărei grile detectabile. Butonul 🐱 este rotund și se poate trage.",14f).apply {
             gravity=Gravity.CENTER
         })
@@ -64,11 +64,6 @@ class MainActivity: Activity() {
         panel.addView(Button(this).apply {
             text="ȘTERGE CALIBRAREA (revino la detectarea automată)"
             setOnClickListener { UserPrefs.clearManualBoard(this@MainActivity) }
-        })
-        panel.addView(Switch(this).apply {
-            text="Previzualizare și confirmare înainte de afișare"
-            isChecked=UserPrefs.previewEnabled(this@MainActivity)
-            setOnCheckedChangeListener { _,v -> UserPrefs.setPreviewEnabled(this@MainActivity,v) }
         })
         panel.addView(Switch(this).apply {
             text="Ascunde automat marcajele când se schimbă nivelul"
