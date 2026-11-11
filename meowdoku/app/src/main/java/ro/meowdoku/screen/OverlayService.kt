@@ -27,7 +27,6 @@ class OverlayService: Service() {
     private var reader:ImageReader?=null
     private var controls:View?=null
     private var overlay:MarkerView?=null
-    private var previewButtons:View?=null
     private var calibrationView:CalibrationView?=null
     private var calibrationButtons:View?=null
     private var lastResult:Puzzle.Result?=null
@@ -393,8 +392,6 @@ class OverlayService: Service() {
         monitorJob=null
         signature=null
         changeFrames=0
-        previewButtons?.let { try { wm.removeViewImmediate(it) } catch(_:Exception) {} }
-        previewButtons=null
         clearJob?.let { handler.removeCallbacks(it) }
         clearJob=null
         overlay?.let {
@@ -484,15 +481,11 @@ class OverlayService: Service() {
         handler.postDelayed(check,2300L)
     }
 
-    private fun confirmPreview(id:Int) {
-        if(stopped || id!=scanGeneration || overlay==null)return
-        clearJob?.let { handler.removeCallbacks(it) }
-        clearJob=null
-        previewButtons?.let { try { wm.removeViewImmediate(it) } catch(_:Exception) {} }
-        previewButtons=null
-        overlay?.confirm()
-        val result=lastResult ?: return
-        setStatus("Confirmat: "+result.size+" marcaje. Ascunde din ⚙ sau notificare.")
+    private fun activateMarkers(id:Int, result:Puzzle.Result) {
+        // Immediate display; no confirmation step. Keep automatic expiration,
+        // level-change monitoring and the emergency Hide/Stop actions.
+        if(stopped || id!=scanGeneration || overlay==null) return
+        setStatus("Soluție "+result.size+"×"+result.size+" afișată. Ascunde din ⚙ sau notificare.")
         val duration=UserPrefs.duration(this)
         if(duration>0) {
             val expiration=Runnable {
@@ -504,57 +497,9 @@ class OverlayService: Service() {
             clearJob=expiration
             handler.postDelayed(expiration,duration*1000L)
         }
-        appToast(if(duration>0) "Soluție confirmată: "+duration+" secunde."
-            else "Soluție confirmată. Ascunde manual din ⚙.")
+        appToast(if(duration>0) "Soluție "+result.size+"×"+result.size+" — "+duration+" secunde."
+            else "Soluție "+result.size+"×"+result.size+" — ascunde manual din ⚙.")
         watchLevelChange(id,result.board,result.size)
-    }
-
-    private fun showPreview(id:Int, result:Puzzle.Result) {
-        val panel=LinearLayout(this).apply {
-            orientation=LinearLayout.VERTICAL
-            setPadding(dp(8),dp(5),dp(8),dp(8))
-            setBackgroundColor(Color.argb(241,34,35,48))
-        }
-        panel.addView(TextView(this).apply {
-            text="PREVIZUALIZARE "+result.size+"×"+result.size+" • verifică marcajele"
-            textSize=13f
-            setTextColor(Color.WHITE)
-        })
-        val actions=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
-        actions.addView(Button(this).apply {
-            text="CONFIRMĂ"
-            setOnClickListener { confirmPreview(id) }
-        })
-        actions.addView(Button(this).apply {
-            text="ANULEAZĂ"
-            setOnClickListener {
-                if(id==scanGeneration) {
-                    scanGeneration++
-                    clearMarks()
-                    setStatus("Previzualizare anulată.")
-                }
-            }
-        })
-        panel.addView(actions)
-        val p=WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity=Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y=(result.board.top-dp(96)).coerceAtLeast(dp(55))
-        }
-        previewButtons=panel
-        wm.addView(panel,p)
-        val expiration=Runnable {
-            if(!stopped && id==scanGeneration && overlay?.preview==true) {
-                clearMarks()
-                setStatus("Previzualizarea a expirat.")
-            }
-        }
-        clearJob=expiration
-        handler.postDelayed(expiration,45000L)
     }
 
     private fun displayResult(id:Int,result:Puzzle.Result,fingerprint:IntArray?) {
@@ -562,10 +507,9 @@ class OverlayService: Service() {
         clearMarks()
         lastResult=result
         signature=fingerprint
-        val shouldPreview=UserPrefs.previewEnabled(this)
         val marks=MarkerView(this,result.columns,result.board,
             UserPrefs.starOpacity(this),UserPrefs.markerShape(this),
-            UserPrefs.markerColor(this),shouldPreview)
+            UserPrefs.markerColor(this))
         val params=WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -580,10 +524,7 @@ class OverlayService: Service() {
         }
         overlay=marks
         wm.addView(marks,params)
-        if(shouldPreview) {
-            setStatus("Previzualizare: confirmă sau anulează cele "+result.size+" marcaje.")
-            showPreview(id,result)
-        } else confirmPreview(id)
+        activateMarkers(id,result)
     }
 
     private fun capture(attempt:Int=0,id:Int) {
