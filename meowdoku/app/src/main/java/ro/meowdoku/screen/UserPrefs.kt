@@ -7,6 +7,11 @@ object UserPrefs {
     private const val FILE = "meowdoku_settings"
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
+    /** AUTO is off until the user explicitly enables it in CatPilot settings. */
+    fun autoSolver(ctx: Context) = prefs(ctx).getBoolean("auto_solver_enabled", false)
+    fun setAutoSolver(ctx: Context, value:Boolean) =
+        prefs(ctx).edit().putBoolean("auto_solver_enabled", value).apply()
+
     fun showMessages(ctx: Context) = prefs(ctx).getBoolean("show_messages", false)
     fun setShowMessages(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean("show_messages", value).apply()
