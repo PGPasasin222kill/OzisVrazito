@@ -47,7 +47,7 @@ class MainActivity: Activity() {
             }
         })
         panel.addView(title("🐱 CatPilot",26f).apply { gravity=Gravity.CENTER })
-        panel.addView(title("VERSIUNEA 1.1.0 • Setări complete",14f).apply { gravity=Gravity.CENTER })
+        panel.addView(title("VERSIUNEA 1.2.0 • Setări complete",14f).apply { gravity=Gravity.CENTER })
         panel.addView(title("Scanare automată a oricărei grile detectabile. Butonul 🐱 este rotund și se poate trage.",14f).apply {
             gravity=Gravity.CENTER
         })
@@ -79,6 +79,57 @@ class MainActivity: Activity() {
                 autoServiceView?.text=autoStatus()
             }
         })
+        panel.addView(Switch(this).apply {
+            text="Continuă automat după nivel (Leaderboard / Flawless)"
+            textSize=16f
+            isChecked=UserPrefs.autoContinue(this@MainActivity)
+            setOnCheckedChangeListener { _,yes ->
+                UserPrefs.setAutoContinue(this@MainActivity,yes)
+            }
+        })
+        panel.addView(Switch(this).apply {
+            text="Mod sigur: nu apăsa dacă ecranul nu este recunoscut"
+            textSize=15f
+            isChecked=UserPrefs.safeAuto(this@MainActivity)
+            setOnCheckedChangeListener { _,yes -> UserPrefs.setSafeAuto(this@MainActivity,yes) }
+        })
+        panel.addView(title("Pauză după închiderea ecranului de final"))
+        val delays=listOf(800,1100,1500,2000)
+        val delayLabels=listOf("0,8 secunde","1,1 secunde","1,5 secunde","2 secunde")
+        panel.addView(Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,
+                android.R.layout.simple_spinner_item,delayLabels).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            val current=UserPrefs.continueDelayMs(this@MainActivity)
+            setSelection(delays.indices.minByOrNull { kotlin.math.abs(delays[it]-current) } ?: 1)
+            onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p:AdapterView<*>?,v:View?,position:Int,id:Long) {
+                    UserPrefs.setContinueDelayMs(this@MainActivity,delays[position])
+                }
+                override fun onNothingSelected(p:AdapterView<*>?) {}
+            }
+        })
+        panel.addView(title("Număr maxim de încercări la fiecare nivel"))
+        val retries=listOf(3,5,8)
+        panel.addView(Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,
+                android.R.layout.simple_spinner_item,listOf("3 încercări","5 încercări","8 încercări")).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setSelection(retries.indexOf(UserPrefs.autoRetryLimit(this@MainActivity)).coerceAtLeast(0))
+            onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p:AdapterView<*>?,v:View?,position:Int,id:Long) {
+                    UserPrefs.setAutoRetryLimit(this@MainActivity,retries[position])
+                }
+                override fun onNothingSelected(p:AdapterView<*>?) {}
+            }
+        })
+        panel.addView(title(
+            "AUTO-continuare pornește doar după ce ai declanșat MEOW cu AUTO activ. " +
+            "Detectează ecranele de final, apasă butonul potrivit și caută nivelul următor. " +
+            "Dacă nu recunoaște ecranul sau nu poate scana, se oprește fără atingeri la întâmplare.",
+            13f))
         autoServiceView=title(autoStatus(),14f)
         panel.addView(autoServiceView)
         panel.addView(Button(this).apply {
