@@ -12,6 +12,29 @@ object UserPrefs {
     fun setAutoSolver(ctx: Context, value:Boolean) =
         prefs(ctx).edit().putBoolean("auto_solver_enabled", value).apply()
 
+    /** Continue only after AUTO has just solved a board. Enabled by user AUTO mode. */
+    fun autoContinue(ctx:Context)=prefs(ctx).getBoolean("auto_continue",true)
+    fun setAutoContinue(ctx:Context,enabled:Boolean)=
+        prefs(ctx).edit().putBoolean("auto_continue",enabled).apply()
+
+    /** Extra wait after a verified result screen is dismissed (milliseconds). */
+    fun continueDelayMs(ctx:Context)=
+        prefs(ctx).getInt("continue_delay_ms",1100).coerceIn(700,2400)
+    fun setContinueDelayMs(ctx:Context,value:Int)=
+        prefs(ctx).edit().putInt("continue_delay_ms",value.coerceIn(700,2400)).apply()
+
+    fun autoRetryLimit(ctx:Context):Int {
+        val value=prefs(ctx).getInt("auto_retry_limit",5)
+        return if(value in listOf(3,5,8)) value else 5
+    }
+    fun setAutoRetryLimit(ctx:Context,value:Int)=
+        prefs(ctx).edit().putInt("auto_retry_limit",value.coerceIn(3,8)).apply()
+
+    /** Always avoid blind fallback taps if no supported result overlay is detected. */
+    fun safeAuto(ctx:Context)=prefs(ctx).getBoolean("safe_auto",true)
+    fun setSafeAuto(ctx:Context,enabled:Boolean)=
+        prefs(ctx).edit().putBoolean("safe_auto",enabled).apply()
+
     fun showMessages(ctx: Context) = prefs(ctx).getBoolean("show_messages", false)
     fun setShowMessages(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean("show_messages", value).apply()
